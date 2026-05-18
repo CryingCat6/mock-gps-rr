@@ -339,8 +339,10 @@ export default function App() {
   useEffect(() => {
     if (!isSystemBridgeActive) return;
     
-    // Stop mocking if app is paused, not running, or hidden (optional) 
-    if (!isRunning || isPaused) {
+    const isArrived = mode === 'ACTIVE' && !isRunning && !isPaused;
+    const shouldMock = (isRunning || isArrived) && !isPaused;
+    
+    if (!shouldMock) {
       MockLocation.stopMockLocation().then(() => {
         // When we stop mocking, try to refresh our real location from the system
         if ("geolocation" in navigator) {
@@ -1241,6 +1243,7 @@ export default function App() {
                         <Instagram size={20} />
                         <Text>@rafiridzuan</Text>
                       </button>
+                      <Text style={{ fontSize: '11px', color: COLORS.TEXT_GREY, marginTop: 16 }}>Version 1.1</Text>
                     </div>
                   </div>
                 </div>
