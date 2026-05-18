@@ -20,7 +20,10 @@ jobs:
           java-version: '17'
 
       - name: Install Dependencies
-        run: npm install
+        run: |
+          npm ci || npm install
+          npm rebuild @tailwindcss/oxide || true
+          npm rebuild esbuild || true
 
       - name: Build React App
         run: npm run build
