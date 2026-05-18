@@ -309,6 +309,7 @@ export default function App() {
 
     // 2. Route Navigation Mode (ACTIVE/Arrived)
     if (mode === 'ACTIVE' && selectedRoute) {
+      // Stay at destination if finished
       if (distanceCovered >= totalRouteDistance) {
         return selectedRoute.coordinates[selectedRoute.coordinates.length - 1];
       }
@@ -856,7 +857,13 @@ export default function App() {
         {(mode === 'SETTING_UP' || mode === 'SELECTING_ROUTE') && (
           <motion.div 
             initial={{ y: -200 }} animate={{ y: 0 }} exit={{ y: -200 }}
-            style={{ position: 'fixed', top: 20, left: 12, right: 12, zIndex: 1000 }}
+            style={{ 
+              position: 'fixed', 
+              top: 'calc(env(safe-area-inset-top, 24px) + 32px)', 
+              left: 12, 
+              right: 12, 
+              zIndex: 1000 
+            }}
           >
             <div style={{ background: 'white', borderRadius: 16, padding: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -935,7 +942,17 @@ export default function App() {
 
       {/* IDLE SEARCH BAR */}
       {mode === 'IDLE' && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ position: 'fixed', top: 25, left: 16, right: 16, zIndex: 1000 }}>
+        <motion.div 
+          initial={{ opacity: 0 }} 
+          animate={{ opacity: 1 }} 
+          style={{ 
+            position: 'fixed', 
+            top: 'calc(env(safe-area-inset-top, 24px) + 36px)', 
+            left: 16, 
+            right: 16, 
+            zIndex: 1000 
+          }}
+        >
             <div style={{ background: 'white', height: 48, borderRadius: 24, boxShadow: '0 2px 4px rgba(0,0,0,0.2), 0 0 1px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8 }}>
                 <div style={{ padding: 8, display: 'flex', alignItems: 'center' }}>
                   <Search size={20} color={COLORS.TEXT_GREY} />
