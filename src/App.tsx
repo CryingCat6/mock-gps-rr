@@ -675,6 +675,7 @@ export default function App() {
                   color={seg.level === 'high' ? COLORS.RED : seg.level === 'medium' ? COLORS.YELLOW : COLORS.BLUE}
                   weight={6}
                   opacity={1}
+                  smoothFactor={0}
                 />
               ));
             }
@@ -684,6 +685,7 @@ export default function App() {
                 color={'#70757a'} 
                 weight={4} 
                 opacity={0.6}
+                smoothFactor={0}
               />
             );
           })}
@@ -698,6 +700,7 @@ export default function App() {
                   color={seg.level === 'high' ? COLORS.RED : seg.level === 'medium' ? COLORS.YELLOW : COLORS.BLUE}
                   weight={6}
                   opacity={0.8}
+                  smoothFactor={0}
                 />
               ))}
               
@@ -707,6 +710,7 @@ export default function App() {
                 color="#70757a"
                 weight={6}
                 opacity={0.9}
+                smoothFactor={0}
               />
             </>
           )}
