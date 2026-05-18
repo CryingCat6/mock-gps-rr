@@ -33,6 +33,11 @@ jobs:
       - name: Sync Capacitor
         run: pnpm exec cap sync android
 
+      - name: Fix Gradle Wrapper
+        run: |
+          mkdir -p android/gradle/wrapper
+          curl -L -o android/gradle/wrapper/gradle-wrapper.jar "https://raw.githubusercontent.com/gradle/gradle/master/gradle/wrapper/gradle-wrapper.jar"
+
       - name: Build Android APK
         run: |
           cd android
