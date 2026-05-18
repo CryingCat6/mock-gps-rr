@@ -38,24 +38,34 @@ public class MockLocationPlugin extends Plugin {
             Context context = getContext();
             LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
             
-            String[] providers = {LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER};
-
+            String[] providers = {
+                LocationManager.GPS_PROVIDER, 
+                LocationManager.NETWORK_PROVIDER, 
+                LocationManager.PASSIVE_PROVIDER,
+                "fused"
+            };
+            
             for (String providerName : providers) {
                 try {
                     if (locationManager.getProvider(providerName) != null) {
-                        locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 2);
+                        try {
+                            locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 2);
+                        } catch (IllegalArgumentException e) {
+                            // If it exists, we might need to remove and re-add to be sure
+                            try {
+                                locationManager.removeTestProvider(providerName);
+                                locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 2);
+                            } catch (Exception ex) {
+                                // Ignore
+                            }
+                        }
+                        locationManager.setTestProviderEnabled(providerName, true);
                     }
                 } catch (SecurityException e) {
                     call.reject("Sila aktifkan app ini di Developer Options -> Select mock location app dahulu!");
                     return;
-                } catch (IllegalArgumentException e) {
-                    // If it already exists, do nothing
-                }
-                
-                try {
-                    locationManager.setTestProviderEnabled(providerName, true);
                 } catch (Exception e) {
-                    // Ignore
+                    // Ignore other errors for specific providers
                 }
             }
 
@@ -70,16 +80,19 @@ public class MockLocationPlugin extends Plugin {
                                     mockLocation.setLatitude(currentLatitude);
                                     mockLocation.setLongitude(currentLongitude);
                                     mockLocation.setAltitude(3.0);
-                                    mockLocation.setTime(System.currentTimeMillis());
+                                    mockLocation.setSpeed(0.01f);
+                                    mockLocation.setBearing(1.0f);
                                     mockLocation.setAccuracy(1.0f);
+                                    mockLocation.setTime(System.currentTimeMillis());
                                     
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
                                         mockLocation.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
                                     }
-                        
+                                    
+                                    // Try to push it to the system
                                     locationManager.setTestProviderLocation(providerName, mockLocation);
                                 } catch (Exception e) {
-                                    // Ignore exceptions during loop
+                                    // Ignore
                                 }
                             }
                         }
@@ -100,6 +113,13 @@ public class MockLocationPlugin extends Plugin {
 
     @PluginMethod
     public void stopMockLocation(PluginCall call) {
+        stopMockingInternally();
+        JSObject ret = new JSObject();
+        ret.put("status", "Mock location dihentikan");
+        call.resolve(ret);
+    }
+
+    private void stopMockingInternally() {
         if (mockLocationRunnable != null) {
             handler.removeCallbacks(mockLocationRunnable);
             mockLocationRunnable = null;
@@ -109,15 +129,20 @@ public class MockLocationPlugin extends Plugin {
             Context context = getContext();
             LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
             
-            String[] providers = {LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER};
+            String[] providers = {
+                LocationManager.GPS_PROVIDER, 
+                LocationManager.NETWORK_PROVIDER, 
+                LocationManager.PASSIVE_PROVIDER,
+                "fused" // Some devices allow "fused" to be manipulated as a test provider
+            };
+            
             for (String providerName : providers) {
                 try {
+                    // Try to clear everything
                     locationManager.setTestProviderEnabled(providerName, false);
-                    locationManager.clearTestProviderEnabled(providerName);
-                    locationManager.clearTestProviderLocation(providerName);
                     locationManager.removeTestProvider(providerName);
                 } catch (Exception e) {
-                    // Ignore if it throws an exception during cleanup
+                    // Ignore if not found or cannot be removed
                 }
             }
         } catch (Exception e) {
@@ -126,10 +151,12 @@ public class MockLocationPlugin extends Plugin {
 
         currentLatitude = null;
         currentLongitude = null;
+    }
 
-        JSObject ret = new JSObject();
-        ret.put("status", "Mock location dihentikan");
-        call.resolve(ret);
+    @Override
+    protected void handleOnDestroy() {
+        stopMockingInternally();
+        super.handleOnDestroy();
     }
 }
 

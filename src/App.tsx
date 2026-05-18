@@ -130,10 +130,49 @@ export default function App() {
   const [isFollowingGPS, setIsFollowingGPS] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  
+
+  const [startLoc, setStartLoc] = useState<[number, number] | null>(null);
   const [realLocation, setRealLocation] = useState<[number, number]>(REAL_LOCATION);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [isSystemBridgeActive, setIsSystemBridgeActive] = useState(false);
+
+  // Persistence Key
+  const PERSISTENCE_KEY = 'MOCK_GPS_LAST_PIN';
+
+  // LOAD PERSISTED PIN
+  const [isPinInitialized, setIsPinInitialized] = useState(false);
+  useEffect(() => {
+    if (isPinInitialized) return;
+    
+    const saved = localStorage.getItem(PERSISTENCE_KEY);
+    if (saved) {
+      try {
+        const coords = JSON.parse(saved);
+        if (Array.isArray(coords) && coords.length === 2) {
+          setStartLoc(coords as [number, number]);
+          setStartQuery(`${coords[0].toFixed(4)}, ${coords[1].toFixed(4)}`);
+          setIsPinInitialized(true);
+        }
+      } catch (e) {
+        console.warn("Failed to parse saved pin");
+      }
+    } else if (realLocation[0] !== REAL_LOCATION[0] || realLocation[1] !== REAL_LOCATION[1]) {
+        // Only initialize once we have a real location that isn't the fallback constant
+        setStartLoc(realLocation);
+        setStartQuery("My Location");
+        setIsPinInitialized(true);
+    }
+  }, [realLocation, isPinInitialized]);
+
+  // SAVE PIN
+  useEffect(() => {
+    if (startLoc && mode === 'MOCKING_LOCATION') {
+      localStorage.setItem(PERSISTENCE_KEY, JSON.stringify(startLoc));
+    }
+  }, [startLoc, mode]);
+
+  // Handle case where startLoc might be null when calculating
+  const getSafeStartLoc = () => startLoc || realLocation;
 
   // SYSTEM BRIDGE DETECTION
   useEffect(() => {
@@ -151,19 +190,31 @@ export default function App() {
 
   // REAL LOCATION DETECTION
   useEffect(() => {
+    let watchId: number;
     if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
+      // Use watchPosition to continuously update the real location state
+      watchId = navigator.geolocation.watchPosition(
         (position) => {
-          setRealLocation([position.coords.latitude, position.coords.longitude]);
-          if (isFollowingGPS && mode === 'IDLE') {
-            setStartLoc([position.coords.latitude, position.coords.longitude]);
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          
+          // Only update realLocation state if we are NOT currently mocking
+          // (because if we are mocking, the system reports the mock as the position)
+          if (!isRunning) {
+            setRealLocation([lat, lng]);
+            if (isFollowingGPS && mode === 'IDLE') {
+              setStartLoc([lat, lng]);
+            }
           }
         },
-        (error) => console.error("Error getting location:", error),
-        { enableHighAccuracy: true }
+        (error) => console.warn("Geolocation watch error:", error),
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
     }
-  }, []);
+    return () => {
+      if (watchId !== undefined) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [isRunning, mode, isFollowingGPS]);
 
   const [mapContext, setMapContext] = useState<{
     show: boolean;
@@ -175,7 +226,6 @@ export default function App() {
 
   const [startQuery, setStartQuery] = useState("My Location");
   const [endQuery, setEndQuery] = useState("");
-  const [startLoc, setStartLoc] = useState<[number, number] | null>(REAL_LOCATION); // Real GPS Area
   const [endLoc, setEndLoc] = useState<[number, number] | null>(null);
   const [pickingMode, setPickingMode] = useState<'start' | 'end' | 'mock_location' | null>(null);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -249,9 +299,19 @@ export default function App() {
   // SYSTEM GPS SYNC LOOP
   useEffect(() => {
     if (!isSystemBridgeActive) return;
-
-    if (!isRunning) {
-      MockLocation.stopMockLocation().catch((err: any) => console.warn(err));
+    
+    // Stop mocking if app is paused, not running, or hidden (optional) 
+    if (!isRunning || isPaused) {
+      MockLocation.stopMockLocation().then(() => {
+        // When we stop mocking, try to refresh our real location from the system
+        if ("geolocation" in navigator) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => setRealLocation([pos.coords.latitude, pos.coords.longitude]),
+            null,
+            { enableHighAccuracy: true, timeout: 2000 }
+          );
+        }
+      }).catch((err: any) => console.warn(err));
       return;
     }
     
@@ -262,7 +322,7 @@ export default function App() {
     }).catch((err: any) => {
       console.warn("Mock location plugin error:", err);
     });
-  }, [currentCoords, isRunning, isSystemBridgeActive]);
+  }, [currentCoords, isRunning, isPaused, isSystemBridgeActive]);
 
   // Engineering Fix 3: Remove clunky Done buttons. 
   // Automated transition when picking mode is active and map is clicked.
@@ -408,12 +468,32 @@ export default function App() {
     
     // Explicitly call the Java plugin to restore real GPS
     if (isSystemBridgeActive) {
-      MockLocation.stopMockLocation().catch((err: any) => console.warn(err));
+      MockLocation.stopMockLocation().then(() => {
+          // After stopping, try to get the real location back from the system
+          if ("geolocation" in navigator) {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                const latlng: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+                setRealLocation(latlng);
+                
+                // USER REQUEST: pin biru kekal di tempat itu (Don't reset startLoc here if it's mock location)
+                // However, for UX clarity, if we were in route mode, we might want to reset? 
+                // User said: "pin biru kekal di tempat itu"
+                // So we only update realLocation and set the mode to IDLE
+              },
+              () => {
+                // Fallback
+                setRealLocation(realLocation);
+              },
+              { enableHighAccuracy: true, timeout: 2000 }
+            );
+          }
+      }).catch((err: any) => console.warn(err));
+    } else {
+        // Web fallback
     }
     
-    // Reset start position
-    setStartLoc(REAL_LOCATION);
-    setStartQuery("My Location");
+    // We stay at current startLoc (the pin) as per user request
     
     setPickingMode(null);
     setIsFollowingGPS(true);
@@ -434,9 +514,9 @@ export default function App() {
             setEndLoc(null);
             setEndQuery("");
 
-            // Engineering Fix: Fresh start for Route Mode, Persistent for Mock Location
+            // Engineering Fix: Route Mode always starts at current real location
             if (newMode === 'SETTING_UP') {
-              setStartLoc(REAL_LOCATION);
+              setStartLoc(realLocation);
               setStartQuery("My Location");
             }
 
