@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap');
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@theme {
+  --color-bg-deep: #FDFCF0;
+  --color-bg-sidebar: #FFFFFF;
+  --color-bg-map: #FDFCF0;
+  --color-accent: #1A73E8;
+  --color-border-subtle: #E8EAED;
+  --color-text-dim: #70757A;
+  --color-success: #1E8E3E;
+  
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply antialiased bg-bg-deep text-[#202124] selection:bg-accent/30 selection:text-white;
+  }
+}
+
+.search-result-item {
+  @apply px-4 py-3 hover:bg-black/5 cursor-pointer border-b border-black/5 last:border-0 transition-all active:scale-[0.98];
+}
+
+.vehicle-option {
+  @apply flex flex-col items-center justify-center py-3 px-1 rounded-xl border border-black/5 transition-all cursor-pointer bg-black/[0.02] hover:bg-black/[0.06] active:scale-95;
+}
+
+.vehicle-option.active {
+  @apply border-accent/40 bg-accent/10 text-accent ring-1 ring-accent/30;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.leaflet-container {
+  background: #FDFCF0 !important;
+}
+
+.gps-dot-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gps-dot-core {
+  width: 14px;
+  height: 14px;
+  background: #4285F4;
+  border: 3px solid white;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(66, 133, 244, 0.6);
+  z-index: 2;
+}
+
+.gps-dot-pulse {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  background: rgba(66, 133, 244, 0.3);
+  border-radius: 50%;
+  animation: gps-pulse 2s infinite ease-out;
+  z-index: 1;
+}
+
+@keyframes gps-pulse {
+  0% { transform: scale(0.6); opacity: 1; }
+  100% { transform: scale(2.4); opacity: 0; }
+}
+
+input[type="range"] {
+  @apply h-1.5 rounded-lg appearance-none cursor-pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  @apply appearance-none w-4 h-4 rounded-full bg-white border-2 border-accent cursor-pointer shadow-[0_0_10px_rgba(0,122,255,0.4)];
+}

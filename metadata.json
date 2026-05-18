@@ -1,0 +1,10 @@
+{
+  "name": "Mock GPS",
+  "description": "Professional-grade GPS mock location and route simulation tool. Features static mocking, route navigation with realistic vehicle icons, and traffic-aware simulation.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
