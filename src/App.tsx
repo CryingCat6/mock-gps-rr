@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { registerPlugin } from '@capacitor/core';
 import { 
   Search, MapPin, Navigation, 
@@ -389,12 +389,18 @@ export default function App() {
   };
 
   // Engineering Fix 2: Multi-Mode Routing (Road vs Flight)
+  const lastCalcRef = useRef<string>("");
+
   const calculateRoutes = async (targetEnd: [number, number], customStart?: [number, number], targetVehicle?: 'car' | 'motor' | 'walk' | 'flight') => {
     const origin = customStart || startLoc;
     if (!origin) return;
-    setIsLoading(true);
     
     const vMode = targetVehicle || vehicle;
+    const cacheKey = `${origin[0]},${origin[1]}-${targetEnd[0]},${targetEnd[1]}-${vMode}`;
+    if (lastCalcRef.current === cacheKey) return;
+    lastCalcRef.current = cacheKey;
+
+    setIsLoading(true);
     
     if (vMode === 'flight') {
       // Instant flight route calculation (Straight lines)
@@ -1140,7 +1146,7 @@ export default function App() {
               
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, height: 48, marginBottom: 16 }}>
                 <Text style={{ flex: 1, fontSize: '18px', color: COLORS.TEXT_DARK, fontWeight: '400', marginLeft: 8 }}>
-                  {showSettings ? 'Settings' : 'Mock GPS'}
+                  {showSettings ? 'Settings' : 'Mock GPS RR'}
                 </Text>
                 {showSettings ? (
                   <button 
@@ -1232,7 +1238,7 @@ export default function App() {
                         <Instagram size={20} />
                         <Text>@rafiridzuan</Text>
                       </button>
-                      <Text style={{ fontSize: '11px', color: COLORS.TEXT_GREY, marginTop: 16 }}>Version 1.11</Text>
+                      <Text style={{ fontSize: '11px', color: COLORS.TEXT_GREY, marginTop: 16 }}>Version 1.12</Text>
                     </div>
                   </div>
                 </div>
@@ -1372,8 +1378,13 @@ export default function App() {
                               </div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
-                              <div style={{ fontSize: '24px', fontWeight: 'bold', color: COLORS.RED }}>
-                                  ~{selectedRoute ? Math.max(1, Math.round((selectedRoute.distance * 0.06) / currentSpeed)) : 0} min
+                              <div style={{ fontSize: '20px', fontWeight: 'bold', color: COLORS.RED }}>
+                                  {selectedRoute ? (() => {
+                                      const totalSecs = Math.round(selectedRoute.distance / (currentSpeed / 3.6));
+                                      const m = Math.floor(totalSecs / 60);
+                                      const s = totalSecs % 60;
+                                      return m > 0 ? `~${m}m ${s}s` : `~${s}s`;
+                                  })() : '0s'}
                               </div>
                               <div style={{ fontSize: '12px', color: COLORS.TEXT_GREY }}>
                                   Simulated ETA
@@ -1433,10 +1444,12 @@ export default function App() {
                           // Accurate ETA based on meters left
                           const remainingDist = Math.max(0, totalRouteDistance - distanceCovered);
                           
-                          // distance (m) / speed (km/h) -> time (min)
-                          // (dist / 1000) / (currentSpeed) * 60 = dist * 0.06 / speed
-                          const mins = Math.max(1, Math.round((remainingDist * 0.06) / currentSpeed));
-                          return `ETA: ${mins} mins`;
+                          // Calculate remaining time in seconds precisely
+                          const remainingSecs = Math.max(0, Math.round(remainingDist / (currentSpeed / 3.6)));
+                          const m = Math.floor(remainingSecs / 60);
+                          const s = remainingSecs % 60;
+                          if (m > 0) return `ETA: ${m} m ${s} s`;
+                          return `ETA: ${s} s`;
                         })()
                       ) : (
                           'Destination reached'
