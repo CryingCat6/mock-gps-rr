@@ -133,6 +133,7 @@ export default function App() {
 
   const [startLoc, setStartLoc] = useState<[number, number] | null>(null);
   const [realLocation, setRealLocation] = useState<[number, number]>(REAL_LOCATION);
+  const [preMockRealLocation, setPreMockRealLocation] = useState<[number, number] | null>(null);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [isSystemBridgeActive, setIsSystemBridgeActive] = useState(false);
 
@@ -372,15 +373,11 @@ export default function App() {
       if (pickingMode === 'start') {
         handleUpdateBluePinManual([lat, lng]);
         setPickingMode(null);
-        if (endLoc && (mode === 'SETTING_UP' || mode === 'SELECTING_ROUTE')) {
-          calculateRoutes(endLoc, [lat, lng]);
-        }
       } else if (pickingMode === 'end') {
         setEndLoc([lat, lng]);
         setEndQuery(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
         setPickingMode(null);
         setMode('SETTING_UP');
-        calculateRoutes([lat, lng]);
       } else if (pickingMode === 'mock_location') {
         handleUpdateBluePinManual([lat, lng]);
         setPickingMode(null);
@@ -500,13 +497,18 @@ export default function App() {
     setIsMockingStatic(false);
     setDistanceCovered(0);
     distanceCoveredRef.current = 0;
+
     setMode('IDLE');
+    setStartLoc(null); // Clear the static mock pin so it snaps back fully
     setRoutes([]);
     setEndLoc(null);
     setEndQuery("");
     
     // 6. Logik Apabila Butang PAUSE / PANGKAH (X) Ditekan
     if (isSystemBridgeActive) {
+      if (preMockRealLocation) {
+        setRealLocation(preMockRealLocation); // Instant snap back visually
+      }
       MockLocation.stopMockLocation().then(() => {
           if ("geolocation" in navigator) {
             // Aggressive hardware request to clear stale cache
@@ -516,14 +518,14 @@ export default function App() {
                 setRealLocation(latlng);
                 // focusing map back to real location happens via isFollowingGPS
               },
-              () => setRealLocation(realLocation),
+              () => {
+                // If it fails, keep the fallback we just set
+              },
               { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
             );
           }
       }).catch((err: any) => console.warn(err));
     }
-    
-    // KEHENDAK UTAMA: Pin Biru kekal di kedudukan terakhir (sudah dihandle oleh reloadLastSavedPin logik di useEffect)
     
     setPickingMode(null);
     setIsFollowingGPS(true);
@@ -583,69 +585,58 @@ export default function App() {
     return 'low';
   }, [selectedRoute]);
 
-  // BACKGROUND SIMULATION SERVICE (SMOOTH INTERPOLATION)
+  // BACKGROUND SIMULATION SERVICE (1-SECOND TICK FOR STABILITY)
   useEffect(() => {
     if (!isRunning || isPaused || !selectedRoute) {
-      lastTickRef.current = 0;
       return;
     }
 
-    let requestId: number;
+    const intervalId = setInterval(() => {
+      setDistanceCovered(prev => {
+        // Find traffic level at current distance to adjust speed
+        let d = 0;
+        let activeIndex = 0;
+        const coords = selectedRoute.coordinates;
+        const currentD = prev;
 
-    const tick = (time: number) => {
-      if (!lastTickRef.current) {
-        lastTickRef.current = time;
-        requestId = requestAnimationFrame(tick);
-        return;
-      }
-
-      const deltaTime = time - lastTickRef.current;
-      lastTickRef.current = time;
-
-      // Find traffic level at current distance to adjust speed
-      let d = 0;
-      let activeIndex = 0;
-      const coords = selectedRoute.coordinates;
-      const currentD = distanceCoveredRef.current;
-
-      for (let i = 0; i < coords.length - 1; i++) {
-        const segDist = L.latLng(coords[i]).distanceTo(coords[i + 1]);
-        if (d + segDist >= currentD) {
-          activeIndex = i;
-          break;
+        for (let i = 0; i < coords.length - 1; i++) {
+          const segDist = L.latLng(coords[i]).distanceTo(coords[i + 1]);
+          if (d + segDist >= currentD) {
+            activeIndex = i;
+            break;
+          }
+          d += segDist;
         }
-        d += segDist;
-      }
-      
-      // Update Index state for ETA and UI labels
-      setCurrentIndex(activeIndex);
+        
+        setCurrentIndex(activeIndex);
 
-      const trafficAt = getTrafficLevelAt(activeIndex);
-      let effectiveSpeed = currentSpeed;
-      if (trafficAt === 'high') {
-        effectiveSpeed = Math.random() * 5 + 10; 
-      } else if (trafficAt === 'medium') {
-        effectiveSpeed = Math.max(15, currentSpeed * 0.5); 
-      }
+        // Required speed to finish exactly in the exact ETA without traffic slow-downs
+        // user requested "if 2 minit please smpai 2 minit thats all" 
+        // 1 second tick = distanceToAdd is exactly speed in m/s
+        const distanceToAdd = (currentSpeed / 3.6);
+        
+        const nextD = prev + distanceToAdd;
 
-      // v = d/t => d = v * t
-      // speed in km/h -> m/ms is (speed / 3600)
-      const distanceToAdd = (effectiveSpeed / 3.6) * (deltaTime / 1000);
-      
-      distanceCoveredRef.current += distanceToAdd;
-      const nextD = distanceCoveredRef.current;
+        if (nextD >= totalRouteDistance) {
+          setIsRunning(false);
+          // Wait briefly, then convert directly to static mock location at destination
+          setTimeout(() => {
+            if (selectedRoute) {
+              const destCoords = selectedRoute.coordinates[selectedRoute.coordinates.length - 1];
+              handleUpdateBluePinManual(destCoords);
+              setMode('MOCKING_LOCATION');
+              setIsRunning(true);
+              setIsMockingStatic(true);
+              setRoutes([]);
+            }
+          }, 0);
+          return totalRouteDistance; // Stay at destination calculation
+        }
+        return nextD;
+      });
+    }, 1000); // Strictly 1 update per second for stable GPS spoofing
 
-      if (nextD >= totalRouteDistance) {
-        setDistanceCovered(totalRouteDistance);
-        setIsRunning(false);
-      } else {
-        setDistanceCovered(nextD);
-        requestId = requestAnimationFrame(tick);
-      }
-    };
-
-    requestId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(requestId);
+    return () => clearInterval(intervalId);
   }, [isRunning, isPaused, selectedRoute, currentSpeed, totalRouteDistance, getTrafficLevelAt]);
 
   return (
@@ -927,7 +918,6 @@ export default function App() {
                                     setEndLoc([r.lat, r.lon]);
                                     setEndQuery(r.display_name.split(',')[0]);
                                     setSearchResults([]);
-                                    calculateRoutes([r.lat, r.lon]);
                                 }}
                                 style={{ padding: '12px 0', borderBottom: `1px solid ${COLORS.BORDER}`, cursor: 'pointer' }}
                             >
@@ -1070,7 +1060,6 @@ export default function App() {
                         setEndQuery(`${mapContext.latlng[0].toFixed(4)}, ${mapContext.latlng[1].toFixed(4)}`);
                         // DO NOT reset startLoc here if it's already set or custom
                         setMode('SETTING_UP'); 
-                        calculateRoutes([mapContext.latlng[0], mapContext.latlng[1]]);
                         setMapContext({ show: false, latlng: null, point: null });
                     }
                 }}
@@ -1243,7 +1232,7 @@ export default function App() {
                         <Instagram size={20} />
                         <Text>@rafiridzuan</Text>
                       </button>
-                      <Text style={{ fontSize: '11px', color: COLORS.TEXT_GREY, marginTop: 16 }}>Version 1.1</Text>
+                      <Text style={{ fontSize: '11px', color: COLORS.TEXT_GREY, marginTop: 16 }}>Version 1.11</Text>
                     </div>
                   </div>
                 </div>
@@ -1299,6 +1288,9 @@ export default function App() {
                     <div style={{ display: 'flex', gap: 12 }}>
                         <button 
                             onClick={() => {
+                                if (!isRunning) {
+                                  setPreMockRealLocation(realLocation);
+                                }
                                 setIsRunning(!isRunning);
                                 setIsMockingStatic(true);
                                 setIsFollowingGPS(true);
@@ -1381,7 +1373,7 @@ export default function App() {
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontSize: '24px', fontWeight: 'bold', color: COLORS.RED }}>
-                                  ~{selectedRoute ? Math.max(1, Math.round(((selectedRoute.durationWithTraffic / 60) * (100 / currentSpeed)))) : 0} min
+                                  ~{selectedRoute ? Math.max(1, Math.round((selectedRoute.distance * 0.06) / currentSpeed)) : 0} min
                               </div>
                               <div style={{ fontSize: '12px', color: COLORS.TEXT_GREY }}>
                                   Simulated ETA
@@ -1410,6 +1402,7 @@ export default function App() {
 
                     <button 
                         onClick={() => { 
+                          setPreMockRealLocation(realLocation);
                           setMode('ACTIVE'); 
                           setIsRunning(true); 
                           setIsPaused(false);
