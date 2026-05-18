@@ -1,0 +1,6 @@
+{
+  "appId": "com.kamu.mockgps",
+  "appName": "MyMockGPS",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

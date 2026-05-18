@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { registerPlugin } from '@capacitor/core';
 import { 
   Search, MapPin, Navigation, 
   Layers, X, Activity, Target, ArrowLeft,
@@ -86,6 +87,9 @@ const endIcon = new L.Icon({
   iconSize: [25, 41],
   iconAnchor: [12, 41],
 });
+
+// --- CAPACITOR PLUGIN ---
+const MockLocation = registerPlugin('MockLocation');
 
 // --- HELPERS ---
 function MapEvents({ onMapClick, onDragStart, onContextMenu }: { onMapClick: (lat: number, lng: number) => void, onDragStart: () => void, onContextMenu: (e: any) => void }) {
@@ -237,6 +241,19 @@ export default function App() {
     // 3. Default (Idle or Others)
     return realLocation;
   }, [isRunning, selectedRoute, currentIndex, mode, startLoc, realLocation]);
+
+  // SYSTEM GPS SYNC LOOP
+  useEffect(() => {
+    if (!isRunning || !isSystemBridgeActive) return;
+    
+    // Call the Android plugin to set mock location
+    MockLocation.setMockLocation({
+      latitude: currentCoords[0],
+      longitude: currentCoords[1]
+    }).catch((err: any) => {
+      console.warn("Mock location plugin error:", err);
+    });
+  }, [currentCoords, isRunning, isSystemBridgeActive]);
 
   // Engineering Fix 3: Remove clunky Done buttons. 
   // Automated transition when picking mode is active and map is clicked.
@@ -1388,22 +1405,27 @@ export default function App() {
                     <div style={{ display: 'flex', gap: 16 }}>
                         <div style={{ width: 28, height: 28, borderRadius: 14, background: COLORS.BLUE, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 'bold' }}>2</div>
                         <div>
-                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>Set Mock Location App</Text>
-                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>Go to <span style={{ fontWeight: '600' }}>Settings &gt; Developer Options</span>. Find <span style={{ fontWeight: '600' }}>"Select mock location app"</span> and choose <span style={{ fontWeight: '600' }}>Mock GPS</span>.</Text>
+                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>App Tak Keluar Dalam List?</Text>
+                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>
+                                Tool <span style={{ fontWeight: '600' }}>Web-to-APK</span> biasa selalunya tak masukkan permission <span style={{ color: COLORS.RED }}>ALLOW_MOCK_LOCATION</span> dalam AndroidManifest.xml.
+                                <br/><br/>
+                                Untuk "Direct Mock", app ini perlukan <span style={{ fontWeight: '600' }}>Capacitor / Cordova</span> build.
+                            </Text>
                         </div>
                     </div>
 
                     <div style={{ display: 'flex', gap: 16 }}>
                         <div style={{ width: 28, height: 28, borderRadius: 14, background: COLORS.BLUE, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 'bold' }}>3</div>
                         <div>
-                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>Build as Native App</Text>
-                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>To move your REAL PIN on Maps, you MUST use a tool that supports <span style={{ fontWeight: '600' }}>Capacitor</span> or <span style={{ fontWeight: '600' }}>Cordova</span> with the Mock Location permissions I have pre-configured in the metadata.</Text>
+                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>Cara Guna "Web Simulation"</Text>
+                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>Buat masa ni, app ni berfungsi dalam browser/APK sebagai simulator. Untuk mock sistem telefon, anda perlukan build yang ada <span style={{ fontWeight: '600' }}>Native GPS Bridge</span>.</Text>
                         </div>
                     </div>
 
-                    <div style={{ background: '#f8f9fa', padding: 16, borderRadius: 16, marginTop: 12 }}>
-                        <Text style={{ fontSize: '12px', color: COLORS.TEXT_GREY, lineHeight: '1.5' }}>
-                            <span style={{ fontWeight: 'bold', color: COLORS.RED }}>Pro Tip:</span> This app simulates location in the map. To mock your REAL GPS for other apps (Grab/Maps), the APK must be built with a Native Bridge (Capacitor/Cordova).
+                    <div style={{ background: '#fef3f3', padding: 16, borderRadius: 16, marginTop: 12, border: '1px solid #fee2e2' }}>
+                        <Text style={{ fontSize: '12px', color: '#b91c1c', lineHeight: '1.5', fontWeight: '500' }}>
+                           <Activity size={12} style={{ display: 'inline', marginRight: 4 }} /> 
+                           Sila pastikan APK builder anda menyokong custom AndroidManifest.xml dan masukkan permission yang saya telah sediakan di dalam metadata.
                         </Text>
                     </div>
 
