@@ -123,12 +123,39 @@ export default function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   
+  const [realLocation, setRealLocation] = useState<[number, number]>(REAL_LOCATION);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [isSystemBridgeActive, setIsSystemBridgeActive] = useState(false);
+
+  // SYSTEM BRIDGE DETECTION
+  useEffect(() => {
+    // Detect if we're in a native bridge that can handle system GPS mocking
+    const isMockBridge = (window as any).AndroidMockBridge || (window as any).Capacitor || (window as any).Cordova;
+    setIsSystemBridgeActive(!!isMockBridge);
+  }, []);
+
   const [confirmDialog, setConfirmDialog] = useState<{
     show: boolean;
     title: string;
     message: string;
     onConfirm: () => void;
   }>({ show: false, title: '', message: '', onConfirm: () => {} });
+
+  // REAL LOCATION DETECTION
+  useEffect(() => {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setRealLocation([position.coords.latitude, position.coords.longitude]);
+          if (isFollowingGPS && mode === 'IDLE') {
+            setStartLoc([position.coords.latitude, position.coords.longitude]);
+          }
+        },
+        (error) => console.error("Error getting location:", error),
+        { enableHighAccuracy: true }
+      );
+    }
+  }, []);
 
   const [mapContext, setMapContext] = useState<{
     show: boolean;
@@ -195,7 +222,7 @@ export default function App() {
     // 1. Static Mocking Mode
     if (mode === 'MOCKING_LOCATION') {
       if (isRunning && startLoc) return startLoc;
-      return REAL_LOCATION;
+      return realLocation;
     }
 
     // 2. Route Navigation Mode (ACTIVE/Arrived)
@@ -208,8 +235,8 @@ export default function App() {
     }
     
     // 3. Default (Idle or Others)
-    return REAL_LOCATION;
-  }, [isRunning, selectedRoute, currentIndex, mode, startLoc]);
+    return realLocation;
+  }, [isRunning, selectedRoute, currentIndex, mode, startLoc, realLocation]);
 
   // Engineering Fix 3: Remove clunky Done buttons. 
   // Automated transition when picking mode is active and map is clicked.
@@ -974,6 +1001,16 @@ export default function App() {
                   
                   <Text style={{ fontSize: '12px', fontWeight: 'bold', color: COLORS.TEXT_GREY, letterSpacing: '1px', marginBottom: 4 }}>PREFERENCES</Text>
                   <button style={menuItemStyle} onClick={() => setShowSettings(true)}><Settings size={20} color={COLORS.TEXT_DARK} /><Text style={{ fontWeight: '600' }}>Settings</Text></button>
+                  <button 
+                    style={menuItemStyle} 
+                    onClick={() => {
+                        setIsMenuOpen(false);
+                        setShowSetupGuide(true);
+                    }}
+                  >
+                    <Activity size={20} color={COLORS.BLUE} />
+                    <Text style={{ fontWeight: '600' }}>Setup Guide (Android)</Text>
+                  </button>
                 </div>
               ) : (
                 /* SETTINGS VIEW */
@@ -1045,6 +1082,16 @@ export default function App() {
                                 {isRunning ? 'Currently Mocking' : 'Ready to start'}
                             </Text>
                         </div>
+                        <div style={{ 
+                            padding: '4px 8px', borderRadius: '4px', 
+                            background: isSystemBridgeActive ? 'rgba(76, 175, 80, 0.1)' : 'rgba(255, 152, 0, 0.1)',
+                            border: `1px solid ${isSystemBridgeActive ? COLORS.GREEN : '#FF9800'}`,
+                            flexShrink: 0
+                        }}>
+                            <Text style={{ fontSize: '10px', fontWeight: 'bold', color: isSystemBridgeActive ? COLORS.GREEN : '#FF9800' }}>
+                                {isSystemBridgeActive ? 'SYSTEM BRIDGE ACTIVE' : 'WEB SIMULATION'}
+                            </Text>
+                        </div>
                         <button 
                             onClick={resetApp}
                             style={{ width: 40, height: 40, borderRadius: 20, background: COLORS.SECONDARY, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
@@ -1079,7 +1126,24 @@ export default function App() {
 
                         <button 
                             onClick={() => {
-                                setStartLoc(REAL_LOCATION);
+                                if (startLoc) {
+                                  navigator.clipboard.writeText(`${startLoc[0]}, ${startLoc[1]}`);
+                                  // Simple alert feedback
+                                  alert(`Copied: ${startLoc[0]}, ${startLoc[1]}`);
+                                }
+                            }}
+                            style={{ 
+                                width: 54, height: 54, borderRadius: 27, 
+                                background: COLORS.SECONDARY, border: 'none', 
+                                display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                            }}
+                        >
+                            <Target size={24} color={COLORS.BLUE} />
+                        </button>
+
+                        <button 
+                            onClick={() => {
+                                setStartLoc(realLocation);
                                 setStartQuery("My Location");
                                 setPickingMode(null);
                             }}
@@ -1094,7 +1158,9 @@ export default function App() {
                     </div>
                     
                     <Text style={{ fontSize: '12px', color: COLORS.TEXT_GREY, textAlign: 'center' }}>
-                        {isRunning ? 'GPS Mock is active' : 'Click map or search for target location'}
+                        {isRunning 
+                            ? (isSystemBridgeActive ? 'GPS System Mocking is LIVE' : 'Simulating in app. For system-wide mock, build as Native APK.') 
+                            : 'Click map or search for target location'}
                     </Text>
                 </div>
             )}
@@ -1285,6 +1351,73 @@ export default function App() {
               </div>
           </div>
       )}
+
+      {/* SETUP GUIDE MODAL */}
+      <AnimatePresence>
+        {showSetupGuide && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <motion.div 
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)' }}
+                onClick={() => setShowSetupGuide(false)}
+            />
+            <motion.div
+                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                style={{ 
+                    position: 'relative', width: '100%', maxWidth: 400, background: 'white', 
+                    borderRadius: 24, padding: 32, boxShadow: '0 20px 40px rgba(0,0,0,0.4)',
+                    maxHeight: '80vh', overflowY: 'auto'
+                }}
+            >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+                    <Text style={{ fontSize: '22px', fontWeight: 'bold', color: COLORS.TEXT_DARK }}>Android Setup Guide</Text>
+                    <button onClick={() => setShowSetupGuide(false)} style={{ background: COLORS.SECONDARY, border: 'none', width: 32, height: 32, borderRadius: 16 }}><X size={18} /></button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                    <div style={{ display: 'flex', gap: 16 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: 14, background: COLORS.BLUE, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 'bold' }}>1</div>
+                        <div>
+                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>Enable Developer Options</Text>
+                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>Go to phone <span style={{ fontWeight: '600' }}>Settings &gt; About Phone</span>. Tap <span style={{ fontWeight: '600' }}>Build Number</span> 7 times until it says "You are a developer".</Text>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 16 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: 14, background: COLORS.BLUE, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 'bold' }}>2</div>
+                        <div>
+                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>Set Mock Location App</Text>
+                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>Go to <span style={{ fontWeight: '600' }}>Settings &gt; Developer Options</span>. Find <span style={{ fontWeight: '600' }}>"Select mock location app"</span> and choose <span style={{ fontWeight: '600' }}>Mock GPS</span>.</Text>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 16 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: 14, background: COLORS.BLUE, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 'bold' }}>3</div>
+                        <div>
+                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>Build as Native App</Text>
+                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>To move your REAL PIN on Maps, you MUST use a tool that supports <span style={{ fontWeight: '600' }}>Capacitor</span> or <span style={{ fontWeight: '600' }}>Cordova</span> with the Mock Location permissions I have pre-configured in the metadata.</Text>
+                        </div>
+                    </div>
+
+                    <div style={{ background: '#f8f9fa', padding: 16, borderRadius: 16, marginTop: 12 }}>
+                        <Text style={{ fontSize: '12px', color: COLORS.TEXT_GREY, lineHeight: '1.5' }}>
+                            <span style={{ fontWeight: 'bold', color: COLORS.RED }}>Pro Tip:</span> This app simulates location in the map. To mock your REAL GPS for other apps (Grab/Maps), the APK must be built with a Native Bridge (Capacitor/Cordova).
+                        </Text>
+                    </div>
+
+                    <button 
+                        onClick={() => setShowSetupGuide(false)}
+                        style={{ width: '100%', height: 48, background: COLORS.BLUE, color: 'white', borderRadius: 24, border: 'none', fontWeight: 'bold', marginTop: 12 }}
+                    >
+                        GOT IT
+                    </button>
+                </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <style>{`
         .gps-dot-pulse { position: absolute; width: 44px; height: 44px; background: rgba(26, 115, 232, 0.25); border-radius: 50%; left: -10px; top: -10px; animation: gps-pulse 2s infinite ease-out; }

@@ -2,7 +2,15 @@
   "name": "Mock GPS",
   "description": "Professional-grade GPS mock location and route simulation tool. Features static mocking, route navigation with realistic vehicle icons, and traffic-aware simulation.",
   "requestFramePermissions": [
-    "geolocation"
+    "geolocation",
+    "camera",
+    "microphone"
+  ],
+  "androidPermissions": [
+    "android.permission.ACCESS_MOCK_LOCATION",
+    "android.permission.ACCESS_FINE_LOCATION",
+    "android.permission.ACCESS_COARSE_LOCATION",
+    "android.permission.ACCESS_BACKGROUND_LOCATION"
   ],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
