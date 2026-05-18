@@ -139,37 +139,56 @@ export default function App() {
   // Persistence Key
   const PERSISTENCE_KEY = 'MOCK_GPS_LAST_PIN';
 
-  // LOAD PERSISTED PIN
-  const [isPinInitialized, setIsPinInitialized] = useState(false);
+  // 1. LOGIK MASA MULA BUKA APP (Init App Setup)
   useEffect(() => {
-    if (isPinInitialized) return;
-    
-    const saved = localStorage.getItem(PERSISTENCE_KEY);
-    if (saved) {
-      try {
-        const coords = JSON.parse(saved);
-        if (Array.isArray(coords) && coords.length === 2) {
-          setStartLoc(coords as [number, number]);
-          setStartQuery(`${coords[0].toFixed(4)}, ${coords[1].toFixed(4)}`);
-          setIsPinInitialized(true);
+    const initializeAppLocation = async () => {
+      // Get saved pin from storage
+      const savedPinData = localStorage.getItem(PERSISTENCE_KEY);
+      
+      if (savedPinData != null) {
+        try {
+          const parsedLocation = JSON.parse(savedPinData);
+          setStartLoc(parsedLocation);
+          setStartQuery(`${parsedLocation[0].toFixed(4)}, ${parsedLocation[1].toFixed(4)}`);
+        } catch (e) {
+          setStartLoc(realLocation);
         }
-      } catch (e) {
-        console.warn("Failed to parse saved pin");
-      }
-    } else if (realLocation[0] !== REAL_LOCATION[0] || realLocation[1] !== REAL_LOCATION[1]) {
-        // Only initialize once we have a real location that isn't the fallback constant
+      } else {
+        // NEW USER: Default Pin to real location
         setStartLoc(realLocation);
         setStartQuery("My Location");
-        setIsPinInitialized(true);
-    }
-  }, [realLocation, isPinInitialized]);
+      }
+    };
 
-  // SAVE PIN
+    initializeAppLocation();
+  }, [realLocation]); // Run when realLocation is first detected
+
+  // 2. LOGIK SETIAP KALI TUKAR MODE (Location vs Route)
   useEffect(() => {
-    if (startLoc && mode === 'MOCKING_LOCATION') {
-      localStorage.setItem(PERSISTENCE_KEY, JSON.stringify(startLoc));
+    // KEHENDAK MOCK ROUTE: By default Pin Biru wajib paksa ikut GPS original
+    if ((mode === 'SETTING_UP' || mode === 'SELECTING_ROUTE' || mode === 'ACTIVE') && realLocation) {
+      setStartLoc(realLocation);
+      setStartQuery("My Location");
+    } else if (mode === 'IDLE' || mode === 'MOCKING_LOCATION') {
+      // Jika tukar balik ke Single Mock Location, panggil balik sejarah pin lama dari storage
+      const savedPinData = localStorage.getItem(PERSISTENCE_KEY);
+      if (savedPinData != null) {
+        try {
+          const parsed = JSON.parse(savedPinData);
+          setStartLoc(parsed);
+          setStartQuery(`${parsed[0].toFixed(4)}, ${parsed[1].toFixed(4)}`);
+        } catch (e) { /* ignore */ }
+      }
     }
-  }, [startLoc, mode]);
+  }, [mode, realLocation]);
+
+  // 4. LOGIK APABILA USER MENGUBAH PIN BIRU MANUAL
+  const handleUpdateBluePinManual = (newCoords: [number, number]) => {
+    setStartLoc(newCoords);
+    setStartQuery(`${newCoords[0].toFixed(4)}, ${newCoords[1].toFixed(4)}`);
+    // Simpan terus ke memori telefon supaya stay kat situ
+    localStorage.setItem(PERSISTENCE_KEY, JSON.stringify(newCoords));
+  };
 
   // Handle case where startLoc might be null when calculating
   const getSafeStartLoc = () => startLoc || realLocation;
@@ -223,6 +242,11 @@ export default function App() {
   }>({ show: false, latlng: null, point: null });
   const [isLoading, setIsLoading] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
+
+  const [distanceCovered, setDistanceCovered] = useState(0); // in meters
+  const distanceCoveredRef = React.useRef(0);
+  const [totalRouteDistance, setTotalRouteDistance] = useState(0); // in meters
+  const lastTickRef = React.useRef<number>(0);
 
   const [startQuery, setStartQuery] = useState("My Location");
   const [endQuery, setEndQuery] = useState("");
@@ -285,16 +309,30 @@ export default function App() {
 
     // 2. Route Navigation Mode (ACTIVE/Arrived)
     if (mode === 'ACTIVE' && selectedRoute) {
-      if (currentIndex < selectedRoute.coordinates.length) {
-        return selectedRoute.coordinates[currentIndex];
+      if (distanceCovered >= totalRouteDistance) {
+        return selectedRoute.coordinates[selectedRoute.coordinates.length - 1];
       }
-      // Stay at destination
-      return selectedRoute.coordinates[selectedRoute.coordinates.length - 1];
+
+      // Interpolate position based on distanceCovered
+      let d = 0;
+      const coords = selectedRoute.coordinates;
+      for (let i = 0; i < coords.length - 1; i++) {
+        const segDist = L.latLng(coords[i]).distanceTo(coords[i + 1]);
+        if (d + segDist >= distanceCovered) {
+          const ratio = (distanceCovered - d) / segDist;
+          const lat = coords[i][0] + (coords[i + 1][0] - coords[i][0]) * ratio;
+          const lng = coords[i][1] + (coords[i + 1][1] - coords[i][1]) * ratio;
+          return [lat, lng];
+        }
+        d += segDist;
+      }
+      
+      return coords[coords.length - 1];
     }
     
     // 3. Default (Idle or Others)
     return realLocation;
-  }, [isRunning, selectedRoute, currentIndex, mode, startLoc, realLocation]);
+  }, [isRunning, selectedRoute, mode, startLoc, realLocation, distanceCovered, totalRouteDistance]);
 
   // SYSTEM GPS SYNC LOOP
   useEffect(() => {
@@ -327,31 +365,26 @@ export default function App() {
   // Engineering Fix 3: Remove clunky Done buttons. 
   // Automated transition when picking mode is active and map is clicked.
   const handleMapClick = (lat: number, lng: number) => {
-    const coordsString = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
     if (pickingMode) {
       if (pickingMode === 'start') {
-        setStartLoc([lat, lng]);
-        setStartQuery(coordsString);
+        handleUpdateBluePinManual([lat, lng]);
         setPickingMode(null);
         if (endLoc && (mode === 'SETTING_UP' || mode === 'SELECTING_ROUTE')) {
           calculateRoutes(endLoc, [lat, lng]);
         }
       } else if (pickingMode === 'end') {
         setEndLoc([lat, lng]);
-        setEndQuery(coordsString);
+        setEndQuery(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
         setPickingMode(null);
         setMode('SETTING_UP');
-        // Auto Trigger Route Calc
         calculateRoutes([lat, lng]);
       } else if (pickingMode === 'mock_location') {
-        setStartLoc([lat, lng]);
-        setStartQuery(coordsString);
+        handleUpdateBluePinManual([lat, lng]);
         setPickingMode(null);
         setMode('MOCKING_LOCATION');
       }
     } else if (mode === 'MOCKING_LOCATION' && !isRunning) {
-      setStartLoc([lat, lng]);
-      setStartQuery(coordsString);
+      handleUpdateBluePinManual([lat, lng]);
     }
   };
 
@@ -384,6 +417,7 @@ export default function App() {
               trafficSegments: traffic.segments,
               label: 'Direct Flight'
           }]);
+          setTotalRouteDistance(dist);
           setSelectedRouteIdx(0);
           setMode('SELECTING_ROUTE');
           // Initialize speed to default for the vehicle
@@ -412,6 +446,7 @@ export default function App() {
               trafficSegments: traffic.segments,
               label: "Recommended Route"
           }]);
+          setTotalRouteDistance(r.distance);
           setSelectedRouteIdx(0);
           setMode('SELECTING_ROUTE');
           // Initialize speed to default for the vehicle
@@ -457,43 +492,35 @@ export default function App() {
 
   // RESET LOGIC
   const resetApp = () => {
-    const prevMode = mode;
     setIsRunning(false);
     setIsPaused(false);
     setIsMockingStatic(false);
+    setDistanceCovered(0);
+    distanceCoveredRef.current = 0;
     setMode('IDLE');
     setRoutes([]);
     setEndLoc(null);
     setEndQuery("");
     
-    // Explicitly call the Java plugin to restore real GPS
+    // 6. Logik Apabila Butang PAUSE / PANGKAH (X) Ditekan
     if (isSystemBridgeActive) {
       MockLocation.stopMockLocation().then(() => {
-          // After stopping, try to get the real location back from the system
           if ("geolocation" in navigator) {
+            // Aggressive hardware request to clear stale cache
             navigator.geolocation.getCurrentPosition(
               (pos) => {
                 const latlng: [number, number] = [pos.coords.latitude, pos.coords.longitude];
                 setRealLocation(latlng);
-                
-                // USER REQUEST: pin biru kekal di tempat itu (Don't reset startLoc here if it's mock location)
-                // However, for UX clarity, if we were in route mode, we might want to reset? 
-                // User said: "pin biru kekal di tempat itu"
-                // So we only update realLocation and set the mode to IDLE
+                // focusing map back to real location happens via isFollowingGPS
               },
-              () => {
-                // Fallback
-                setRealLocation(realLocation);
-              },
-              { enableHighAccuracy: true, timeout: 2000 }
+              () => setRealLocation(realLocation),
+              { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
             );
           }
       }).catch((err: any) => console.warn(err));
-    } else {
-        // Web fallback
     }
     
-    // We stay at current startLoc (the pin) as per user request
+    // KEHENDAK UTAMA: Pin Biru kekal di kedudukan terakhir (sudah dihandle oleh reloadLastSavedPin logik di useEffect)
     
     setPickingMode(null);
     setIsFollowingGPS(true);
@@ -525,17 +552,17 @@ export default function App() {
     };
 
     if (isRunning) {
-        setConfirmDialog({
-            show: true,
-            title: 'Stop current session?',
-            message: 'Switching modes will terminate your active mock task. Do you want to proceed?',
-            onConfirm: () => {
-                resetApp();
-                setConfirmDialog(p => ({ ...p, show: false }));
-                doSwitch();
-            }
-        });
-        return;
+      setConfirmDialog({
+        show: true,
+        title: 'Stop current session?',
+        message: 'Switching modes will terminate your active mock task. Do you want to proceed?',
+        onConfirm: () => {
+          resetApp();
+          setConfirmDialog(p => ({ ...p, show: false }));
+          setTimeout(doSwitch, 50); // slight delay for state sync
+        }
+      });
+      return;
     }
 
     doSwitch();
@@ -553,34 +580,70 @@ export default function App() {
     return 'low';
   }, [selectedRoute]);
 
-  // BACKGROUND SIMULATION SERVICE
+  // BACKGROUND SIMULATION SERVICE (SMOOTH INTERPOLATION)
   useEffect(() => {
-    if (!isRunning || isPaused || !selectedRoute) return;
-    
-    const trafficAt = getTrafficLevelAt(currentIndex);
-    let effectiveSpeed = currentSpeed;
-    
-    // Auto-slow logic based on traffic: Blue = User Speed, Yellow = -20kmh/60% slower, Red = 5-25kmh
-    if (trafficAt === 'high') {
-      effectiveSpeed = Math.random() * 20 + 5; 
-    } else if (trafficAt === 'medium') {
-      effectiveSpeed = Math.max(15, currentSpeed * 0.4); 
+    if (!isRunning || isPaused || !selectedRoute) {
+      lastTickRef.current = 0;
+      return;
     }
 
-    const timeout = setTimeout(() => {
-      setCurrentIndex(prev => {
-        const next = prev + 1;
-        if (next >= selectedRoute.coordinates.length) {
-          setIsRunning(false);
-          // NEW: We stay in ACTIVE mode at the destination until user resets
-          return prev; 
+    let requestId: number;
+
+    const tick = (time: number) => {
+      if (!lastTickRef.current) {
+        lastTickRef.current = time;
+        requestId = requestAnimationFrame(tick);
+        return;
+      }
+
+      const deltaTime = time - lastTickRef.current;
+      lastTickRef.current = time;
+
+      // Find traffic level at current distance to adjust speed
+      let d = 0;
+      let activeIndex = 0;
+      const coords = selectedRoute.coordinates;
+      const currentD = distanceCoveredRef.current;
+
+      for (let i = 0; i < coords.length - 1; i++) {
+        const segDist = L.latLng(coords[i]).distanceTo(coords[i + 1]);
+        if (d + segDist >= currentD) {
+          activeIndex = i;
+          break;
         }
-        return next;
-      });
-    }, Math.max(10, 1000 / (effectiveSpeed / 20)));
-    
-    return () => clearTimeout(timeout);
-  }, [isRunning, selectedRoute, currentSpeed, isPaused, currentIndex, getTrafficLevelAt]);
+        d += segDist;
+      }
+      
+      // Update Index state for ETA and UI labels
+      setCurrentIndex(activeIndex);
+
+      const trafficAt = getTrafficLevelAt(activeIndex);
+      let effectiveSpeed = currentSpeed;
+      if (trafficAt === 'high') {
+        effectiveSpeed = Math.random() * 5 + 10; 
+      } else if (trafficAt === 'medium') {
+        effectiveSpeed = Math.max(15, currentSpeed * 0.5); 
+      }
+
+      // v = d/t => d = v * t
+      // speed in km/h -> m/ms is (speed / 3600)
+      const distanceToAdd = (effectiveSpeed / 3.6) * (deltaTime / 1000);
+      
+      distanceCoveredRef.current += distanceToAdd;
+      const nextD = distanceCoveredRef.current;
+
+      if (nextD >= totalRouteDistance) {
+        setDistanceCovered(totalRouteDistance);
+        setIsRunning(false);
+      } else {
+        setDistanceCovered(nextD);
+        requestId = requestAnimationFrame(tick);
+      }
+    };
+
+    requestId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(requestId);
+  }, [isRunning, isPaused, selectedRoute, currentSpeed, totalRouteDistance, getTrafficLevelAt]);
 
   return (
     <div style={{ height: '100vh', width: '100vw', position: 'relative', background: '#e5e3df', overflow: 'hidden', fontFamily: 'system-ui' }}>
@@ -640,7 +703,7 @@ export default function App() {
               
               {/* TRAVELED PATH (History - Gray) */}
                 <Polyline 
-                positions={selectedRoute.coordinates.slice(0, currentIndex + 1)}
+                positions={[...selectedRoute.coordinates.slice(0, currentIndex + 1), currentCoords]}
                 color="#70757a"
                 weight={6}
                 opacity={0.9}
@@ -789,7 +852,7 @@ export default function App() {
         {(mode === 'SETTING_UP' || mode === 'SELECTING_ROUTE') && (
           <motion.div 
             initial={{ y: -200 }} animate={{ y: 0 }} exit={{ y: -200 }}
-            style={{ position: 'fixed', top: 50, left: 12, right: 12, zIndex: 1000 }}
+            style={{ position: 'fixed', top: 20, left: 12, right: 12, zIndex: 1000 }}
           >
             <div style={{ background: 'white', borderRadius: 16, padding: 16, boxShadow: '0 8px 32px rgba(0,0,0,0.12)', display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -868,7 +931,7 @@ export default function App() {
 
       {/* IDLE SEARCH BAR */}
       {mode === 'IDLE' && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ position: 'fixed', top: 50, left: 16, right: 16, zIndex: 1000 }}>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ position: 'fixed', top: 25, left: 16, right: 16, zIndex: 1000 }}>
             <div style={{ background: 'white', height: 48, borderRadius: 24, boxShadow: '0 2px 4px rgba(0,0,0,0.2), 0 0 1px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8 }}>
                 <div style={{ padding: 8, display: 'flex', alignItems: 'center' }}>
                   <Search size={20} color={COLORS.TEXT_GREY} />
@@ -968,7 +1031,7 @@ export default function App() {
             <button 
                 onClick={() => {
                    if (mapContext.latlng) {
-                     setStartLoc([mapContext.latlng[0], mapContext.latlng[1]]);
+                     handleUpdateBluePinManual([mapContext.latlng[0], mapContext.latlng[1]]);
                      handleModeSwitch('MOCKING_LOCATION');
                      setMapContext({ show: false, latlng: null, point: null });
                    }
@@ -982,14 +1045,15 @@ export default function App() {
                     if (mapContext.latlng) {
                         setEndLoc([mapContext.latlng[0], mapContext.latlng[1]]);
                         setEndQuery(`${mapContext.latlng[0].toFixed(4)}, ${mapContext.latlng[1].toFixed(4)}`);
-                        handleModeSwitch('SETTING_UP');
+                        // DO NOT reset startLoc here if it's already set or custom
+                        setMode('SETTING_UP'); 
                         calculateRoutes([mapContext.latlng[0], mapContext.latlng[1]]);
                         setMapContext({ show: false, latlng: null, point: null });
                     }
                 }}
                 style={{ ...menuItemStyle, padding: '10px 16px', fontSize: '14px' }}
             >
-                <Navigation size={16} color={COLORS.BLUE} /> Mock Route
+                <Navigation size={16} color={COLORS.RED} /> Mock Route
             </button>
           </motion.div>
         )}
@@ -1326,6 +1390,8 @@ export default function App() {
                           setIsRunning(true); 
                           setIsPaused(false);
                           setCurrentIndex(0); 
+                          setDistanceCovered(0);
+                          distanceCoveredRef.current = 0;
                           setIsFollowingGPS(true);
                         }}
                         style={{ height: 54, background: COLORS.BLUE, borderRadius: 27, color: 'white', border: 'none', fontSize: '18px', fontWeight: 'bold' }}
@@ -1342,13 +1408,23 @@ export default function App() {
                           <div style={{ fontSize: '32px', fontWeight: 'bold', color: isRunning ? (isPaused ? COLORS.BLUE : COLORS.GREEN) : COLORS.BLUE }}>
                             {isRunning ? (isPaused ? 'Paused' : 'Navigating...') : 'Arrived'}
                           </div>
-                          <div style={{ fontSize: '14px', color: isRunning ? COLORS.RED : COLORS.GREEN, fontWeight: 'bold' }}>
-                            {isRunning ? (
-                                `ETA: ${selectedRoute ? Math.max(1, Math.round((selectedRoute.durationWithTraffic / 60) * (1 - currentIndex / selectedRoute.coordinates.length) * (100 / currentSpeed))) : 0} mins`
-                            ) : (
-                                'Destination reached'
-                            )}
-                          </div>
+                    <div style={{ fontSize: '14px', color: isRunning ? COLORS.RED : COLORS.GREEN, fontWeight: 'bold' }}>
+                      {isRunning ? (
+                        (() => {
+                          if (!selectedRoute) return '0 mins';
+                          
+                          // Accurate ETA based on meters left
+                          const remainingDist = Math.max(0, totalRouteDistance - distanceCovered);
+                          
+                          // distance (m) / speed (km/h) -> time (min)
+                          // (dist / 1000) / (currentSpeed) * 60 = dist * 0.06 / speed
+                          const mins = Math.max(1, Math.round((remainingDist * 0.06) / currentSpeed));
+                          return `ETA: ${mins} mins`;
+                        })()
+                      ) : (
+                          'Destination reached'
+                      )}
+                    </div>
                         </div>
                         <div style={{ display: 'flex', gap: 12 }}>
                           {isRunning ? (

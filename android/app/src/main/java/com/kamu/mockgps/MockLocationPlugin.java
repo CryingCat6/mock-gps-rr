@@ -133,7 +133,7 @@ public class MockLocationPlugin extends Plugin {
                 LocationManager.GPS_PROVIDER, 
                 LocationManager.NETWORK_PROVIDER, 
                 LocationManager.PASSIVE_PROVIDER,
-                "fused" // Some devices allow "fused" to be manipulated as a test provider
+                "fused"
             };
             
             for (String providerName : providers) {
