@@ -89,7 +89,11 @@ const endIcon = new L.Icon({
 });
 
 // --- CAPACITOR PLUGIN ---
-const MockLocation = registerPlugin('MockLocation');
+export interface MockLocationPlugin {
+  setMockLocation(options: { latitude: number; longitude: number }): Promise<{ status: string }>;
+  stopMockLocation(): Promise<{ status: string }>;
+}
+const MockLocation = registerPlugin<MockLocationPlugin>('MockLocation');
 
 // --- HELPERS ---
 function MapEvents({ onMapClick, onDragStart, onContextMenu }: { onMapClick: (lat: number, lng: number) => void, onDragStart: () => void, onContextMenu: (e: any) => void }) {
@@ -244,7 +248,12 @@ export default function App() {
 
   // SYSTEM GPS SYNC LOOP
   useEffect(() => {
-    if (!isRunning || !isSystemBridgeActive) return;
+    if (!isSystemBridgeActive) return;
+
+    if (!isRunning) {
+      MockLocation.stopMockLocation().catch((err: any) => console.warn(err));
+      return;
+    }
     
     // Call the Android plugin to set mock location
     MockLocation.setMockLocation({
@@ -397,12 +406,14 @@ export default function App() {
     setEndLoc(null);
     setEndQuery("");
     
-    // Only reset start position if we were routing
-    // Keep it if we were just mocking a static location
-    if (prevMode !== 'MOCKING_LOCATION') {
-        setStartLoc(REAL_LOCATION);
-        setStartQuery("My Location");
+    // Explicitly call the Java plugin to restore real GPS
+    if (isSystemBridgeActive) {
+      MockLocation.stopMockLocation().catch((err: any) => console.warn(err));
     }
+    
+    // Reset start position
+    setStartLoc(REAL_LOCATION);
+    setStartQuery("My Location");
     
     setPickingMode(null);
     setIsFollowingGPS(true);
