@@ -37,7 +37,7 @@ interface RouteInfo {
 }
 
 // --- CONSTANTS ---
-const REAL_LOCATION: [number, number] = [5.3880, 100.5500];
+const REAL_LOCATION: [number, number] = [5.4233046, 100.5837301];
 
 // --- COLORS ---
 const COLORS = {
@@ -132,7 +132,7 @@ export default function App() {
   const [isPaused, setIsPaused] = useState(false);
 
   const [startLoc, setStartLoc] = useState<[number, number] | null>(null);
-  const [realLocation, setRealLocation] = useState<[number, number]>(REAL_LOCATION);
+  const [realLocation, setRealLocation] = useState<[number, number] | null>(null);
   const [preMockRealLocation, setPreMockRealLocation] = useState<[number, number] | null>(null);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [isSystemBridgeActive, setIsSystemBridgeActive] = useState(false);
@@ -202,7 +202,7 @@ export default function App() {
   };
 
   // Handle case where startLoc might be null when calculating
-  const getSafeStartLoc = () => startLoc || realLocation;
+  const getSafeStartLoc = () => startLoc || realLocation || REAL_LOCATION;
 
   // SYSTEM BRIDGE DETECTION
   useEffect(() => {
@@ -364,7 +364,7 @@ export default function App() {
     // 1. Static Mocking Mode
     if (mode === 'MOCKING_LOCATION') {
       if (isRunning && startLoc) return startLoc;
-      return realLocation;
+      return realLocation || REAL_LOCATION;
     }
 
     // 2. Route Navigation Mode (ACTIVE/Arrived)
@@ -392,7 +392,7 @@ export default function App() {
     }
     
     // 3. Default (Idle or Others)
-    return realLocation;
+    return realLocation || REAL_LOCATION;
   }, [isRunning, selectedRoute, mode, startLoc, realLocation, distanceCovered, totalRouteDistance]);
 
   // SYSTEM GPS SYNC LOOP
@@ -1626,7 +1626,7 @@ export default function App() {
           <motion.div 
             initial={false} 
             animate={{ y: isPresetsOpen ? 0 : (window.innerHeight * 0.55) - 110 }}
-            transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+            transition={{ type: 'spring', damping: 26, stiffness: 260 }}
             drag="y"
             dragElastic={0.1}
             dragConstraints={{ top: 0, bottom: (window.innerHeight * 0.55) - 110 }}
