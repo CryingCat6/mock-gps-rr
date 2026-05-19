@@ -250,17 +250,17 @@ public class MockLocationPlugin extends Plugin {
         try {
             android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS);
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-            getContext().startActivity(intent);
+            getActivity().startActivity(intent);
             call.resolve();
         } catch (Exception e) {
             // Intent not found (developer options not enabled), fallback to general settings
             try {
                 android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_SETTINGS);
                 intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-                getContext().startActivity(intent);
+                getActivity().startActivity(intent);
                 call.resolve();
             } catch (Exception e2) {
-                call.reject("Could not open settings");
+                call.reject("Could not open settings", e2);
             }
         }
     }
