@@ -156,7 +156,6 @@ public class MockLocationPlugin extends Plugin {
                     Bundle extras = new Bundle();
                     extras.putInt("satellites", 12);
                     mockLocation.setExtras(extras);
-                    mockLocation.makeComplete();
 
                     // Try to push it to the system
                     locationManager.setTestProviderLocation(providerName, mockLocation);
@@ -193,7 +192,6 @@ public class MockLocationPlugin extends Plugin {
                                     Bundle extras = new Bundle();
                                     extras.putInt("satellites", 12);
                                     mockLocation.setExtras(extras);
-                                    mockLocation.makeComplete();
                                     
                                     // Try to push it to the system
                                     locationManager.setTestProviderLocation(providerName, mockLocation);
