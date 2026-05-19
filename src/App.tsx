@@ -96,6 +96,7 @@ export interface MockLocationPlugin {
   finishNotification(options: { title: string; text: string }): Promise<void>;
   addListener(eventName: 'onMockStopped', listenerFunc: (info: any) => void): any;
   openDeveloperOptions(): Promise<void>;
+  requestAppPermissions(): Promise<void>;
 }
 const MockLocation = registerPlugin<MockLocationPlugin>('MockLocation');
 
@@ -231,6 +232,12 @@ export default function App() {
         navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: false, maximumAge: 60000 });
       }
 
+      if (isSystemBridgeActive) {
+        try {
+          await MockLocation.requestAppPermissions();
+        } catch(e) {}
+      }
+
       // Load Presets
       const savedPresets = localStorage.getItem('MOCK_GPS_PRESETS');
       if (savedPresets) {
@@ -329,7 +336,7 @@ export default function App() {
           }
         },
         (error) => console.warn("Geolocation watch error:", error),
-        { enableHighAccuracy: true, timeout: 2000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 5000 }
       );
     }
     return () => {
@@ -501,7 +508,7 @@ export default function App() {
             navigator.geolocation.getCurrentPosition(
               (pos) => setRealLocation([pos.coords.latitude, pos.coords.longitude]),
               null,
-              { enableHighAccuracy: true, timeout: 2000 }
+              { enableHighAccuracy: true, timeout: 5000, maximumAge: 5000 }
             );
           }
         }).catch((err: any) => console.warn("stopMockLocation error:", err));
@@ -510,7 +517,7 @@ export default function App() {
           navigator.geolocation.getCurrentPosition(
             (pos) => setRealLocation([pos.coords.latitude, pos.coords.longitude]),
             null,
-            { enableHighAccuracy: true, timeout: 2000 }
+            { enableHighAccuracy: true, timeout: 5000, maximumAge: 5000 }
           );
         }
       }
@@ -524,6 +531,12 @@ export default function App() {
         longitude: currentCoords[1]
       }).catch((err: any) => {
         console.warn("setMockLocation error:", err);
+        // If there's an error setting mock location, likely lack of developer options.
+        setIsRunning(false);
+        setIsPaused(false);
+        setIsMockingStatic(false);
+        setMode('IDLE');
+        setShowSetupGuide(true);
       });
     }
   }, [currentCoords, isRunning, isPaused, isSystemBridgeActive]);
@@ -730,7 +743,7 @@ export default function App() {
               () => {
                 // If it fails, keep the fallback we just set
               },
-              { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+              { enableHighAccuracy: true, timeout: 5000, maximumAge: 5000 }
             );
           }
       }).catch((err: any) => console.warn(err));

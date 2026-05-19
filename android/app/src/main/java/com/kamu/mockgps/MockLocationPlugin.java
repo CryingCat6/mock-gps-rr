@@ -16,7 +16,15 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-@CapacitorPlugin(name = "MockLocation")
+import android.Manifest;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.PermissionState;
+import com.getcapacitor.annotation.PermissionCallback;
+
+@CapacitorPlugin(name = "MockLocation", permissions = {
+    @Permission(alias = "location", strings = { Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION }),
+    @Permission(alias = "notifications", strings = { Manifest.permission.POST_NOTIFICATIONS })
+})
 public class MockLocationPlugin extends Plugin {
 
     private Handler handler = new Handler(Looper.getMainLooper());
@@ -53,6 +61,21 @@ public class MockLocationPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void requestAppPermissions(PluginCall call) {
+        if (getPermissionState("location") != PermissionState.GRANTED || 
+            (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && getPermissionState("notifications") != PermissionState.GRANTED)) {
+            requestAllPermissions(call, "permissionsCallback");
+        } else {
+            call.resolve();
+        }
+    }
+
+    @PermissionCallback
+    private void permissionsCallback(PluginCall call) {
+        call.resolve();
+    }
+
+    @PluginMethod
     public void setMockLocation(PluginCall call) {
         Double latitude = call.getDouble("latitude");
         Double longitude = call.getDouble("longitude");
@@ -72,7 +95,7 @@ public class MockLocationPlugin extends Plugin {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Intent serviceIntent = new Intent(context, MockLocationService.class);
                 serviceIntent.setAction("START");
-                serviceIntent.putExtra("title", "Mock GPS rr");
+                serviceIntent.putExtra("title", "mock GPS rr");
                 serviceIntent.putExtra("text", "Running...");
                 context.startForegroundService(serviceIntent);
             } else {
@@ -93,12 +116,12 @@ public class MockLocationPlugin extends Plugin {
                 try {
                     if (locationManager.getProvider(providerName) != null) {
                         try {
-                            locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 2);
+                            locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 2, 2);
                         } catch (IllegalArgumentException e) {
                             // If it exists, we might need to remove and re-add to be sure
                             try {
                                 locationManager.removeTestProvider(providerName);
-                                locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 2);
+                                locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 2, 2);
                             } catch (Exception ex) {
                                 // Ignore
                             }
@@ -110,6 +133,29 @@ public class MockLocationPlugin extends Plugin {
                     return;
                 } catch (Exception e) {
                     // Ignore other errors for specific providers
+                }
+            }
+
+            // Push immediately
+            for (String providerName : providers) {
+                try {
+                    Location mockLocation = new Location(providerName);
+                    mockLocation.setLatitude(currentLatitude);
+                    mockLocation.setLongitude(currentLongitude);
+                    mockLocation.setAltitude(3.0);
+                    mockLocation.setSpeed(0.01f);
+                    mockLocation.setBearing(1.0f);
+                    mockLocation.setAccuracy(1.0f);
+                    mockLocation.setTime(System.currentTimeMillis());
+                    
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
+                        mockLocation.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+                    }
+                    
+                    // Try to push it to the system
+                    locationManager.setTestProviderLocation(providerName, mockLocation);
+                } catch (Exception e) {
+                    // Ignore
                 }
             }
 
@@ -140,7 +186,7 @@ public class MockLocationPlugin extends Plugin {
                                 }
                             }
                         }
-                        handler.postDelayed(this, 1000); // Repeat every 1 second
+                        handler.postDelayed(this, 300); // Repeat every 300ms fallback
                     }
                 };
                 handler.post(mockLocationRunnable);
@@ -188,7 +234,7 @@ public class MockLocationPlugin extends Plugin {
 
     @PluginMethod
     public void finishNotification(PluginCall call) {
-        String title = call.getString("title", "Mock GPS rr");
+        String title = call.getString("title", "mock GPS rr");
         String text = call.getString("text", "You have reached your destination.");
         
         Intent serviceIntent = new Intent(getContext(), MockLocationService.class);
