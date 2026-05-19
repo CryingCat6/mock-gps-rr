@@ -10,8 +10,8 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        registerPlugin(MockLocationPlugin.class);
         super.onCreate(savedInstanceState);
+        registerPlugin(MockLocationPlugin.class);
 
         // Make the content appear under the status and navigation bars
         Window window = getWindow();

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { 
   Search, MapPin, Navigation, 
   Layers, X, Activity, Target, ArrowLeft,
@@ -131,10 +131,10 @@ function MapFitBounds({ bounds, center }: { bounds?: any, center?: any }) {
       // Small timeout to allow container to size before fitting
       setTimeout(() => {
         map.invalidateSize();
-        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+        map.fitBounds(bounds, { padding: [16, 16], maxZoom: 16 });
       }, 50);
     } else if (center) {
-      map.setView(center, 13);
+      map.setView(center, 15);
     }
   }, [map, bounds, center]);
   return null;
@@ -142,8 +142,21 @@ function MapFitBounds({ bounds, center }: { bounds?: any, center?: any }) {
 
 function PresetMapPreview({ preset, activeLayer }: { preset: any, activeLayer: string }) {
   const isRoute = preset.endLoc && (preset.startLoc[0] !== preset.endLoc[0] || preset.startLoc[1] !== preset.endLoc[1]);
-  const bounds: any = isRoute ? [preset.startLoc, preset.endLoc] : undefined;
   
+  let bounds: any = isRoute ? [preset.startLoc, preset.endLoc] : undefined;
+  
+  if (preset.routeCoords && preset.routeCoords.length > 0) {
+    let minLat = preset.routeCoords[0][0], maxLat = preset.routeCoords[0][0];
+    let minLng = preset.routeCoords[0][1], maxLng = preset.routeCoords[0][1];
+    for (const [lat, lng] of preset.routeCoords) {
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+    }
+    bounds = [[minLat, minLng], [maxLat, maxLng]];
+  }
+
   return (
     <MapContainer 
       center={preset.startLoc} 
@@ -261,17 +274,21 @@ export default function App() {
   // SYSTEM BRIDGE DETECTION
   useEffect(() => {
     // Detect if we're in a native bridge that can handle system GPS mocking
-    const isMockBridge = (window as any).AndroidMockBridge || (window as any).Capacitor || (window as any).Cordova;
+    const isMockBridge = typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform();
     setIsSystemBridgeActive(!!isMockBridge);
     
-    if (isMockBridge && (window as any).Capacitor) {
-      const { MockLocation } = (window as any).Capacitor.Plugins;
-      if (MockLocation?.addListener) {
-        MockLocation.addListener('onMockStopped', () => {
-          setIsRunning(false);
-          setIsPaused(false);
-          setMode('IDLE');
-        });
+    if (isMockBridge) {
+      try {
+        const { MockLocation } = (window as any).Capacitor.Plugins;
+        if (MockLocation?.addListener) {
+          MockLocation.addListener('onMockStopped', () => {
+            setIsRunning(false);
+            setIsPaused(false);
+            setMode('IDLE');
+          });
+        }
+      } catch (e) {
+        console.warn('MockLocation plugin not available', e);
       }
     }
   }, []);
@@ -477,7 +494,7 @@ export default function App() {
             { enableHighAccuracy: true, timeout: 2000 }
           );
         }
-      }).catch((err: any) => console.warn(err));
+      }).catch((err: any) => console.warn("stopMockLocation error:", err));
       return;
     }
     
@@ -486,7 +503,7 @@ export default function App() {
       latitude: currentCoords[0],
       longitude: currentCoords[1]
     }).catch((err: any) => {
-      console.warn("Mock location plugin error:", err);
+      console.warn("setMockLocation error:", err);
     });
   }, [currentCoords, isRunning, isPaused, isSystemBridgeActive]);
 
@@ -896,7 +913,7 @@ export default function App() {
           // Feature 2: Arrival Logic
           setIsRunning(false);
           
-          if (isSystemBridgeActive && (window as any).Capacitor) {
+          if (isSystemBridgeActive) {
             const { MockLocation } = (window as any).Capacitor.Plugins;
             MockLocation.finishNotification({ title: 'Mock GPS rr', text: 'You have reached your destination. Now Mock your Location to destination.' }).catch(console.warn);
           } else {
@@ -930,7 +947,7 @@ export default function App() {
 
         // Send push notification every 5 seconds
         if (jitterTimerRef.current % 5 === 0) {
-          if (isSystemBridgeActive && (window as any).Capacitor) {
+          if (isSystemBridgeActive) {
              const remainingDist = Math.max(0, totalRouteDistance - nextD);
              const remainingSecs = Math.max(0, Math.round(remainingDist / (effectiveSpeed / 3.6)));
              const m = Math.floor(remainingSecs / 60);
@@ -2192,7 +2209,7 @@ export default function App() {
                         <button 
                             onClick={async () => {
                                 setShowSetupGuide(false);
-                                if ((window as any).Capacitor) {
+                                if (isSystemBridgeActive) {
                                   try {
                                     const { MockLocation } = (window as any).Capacitor.Plugins;
                                     await MockLocation.openDeveloperOptions();
