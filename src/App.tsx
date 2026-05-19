@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { registerPlugin } from '@capacitor/core';
 import { 
   Search, MapPin, Navigation, 
   Layers, X, Activity, Target, ArrowLeft,
@@ -261,10 +261,10 @@ export default function App() {
   // SYSTEM BRIDGE DETECTION
   useEffect(() => {
     // Detect if we're in a native bridge that can handle system GPS mocking
-    const isMockBridge = typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform();
+    const isMockBridge = (window as any).AndroidMockBridge || (window as any).Capacitor || (window as any).Cordova;
     setIsSystemBridgeActive(!!isMockBridge);
     
-    if (isMockBridge) {
+    if (isMockBridge && (window as any).Capacitor) {
       const { MockLocation } = (window as any).Capacitor.Plugins;
       if (MockLocation?.addListener) {
         MockLocation.addListener('onMockStopped', () => {
@@ -658,18 +658,22 @@ export default function App() {
     isInitialSpeedSetRef.current = false; // Reset speed lock
 
     setMode('IDLE');
+    // We KEEP the startLoc (pin) so it remembers where user put it last in Static Mock Mode
     setRoutes([]);
     setEndLoc(null);
     setEndQuery("");
 
-    // Return to original GPS location when reset
-    const actualLocation = preMockRealLocation || realLocation;
-    if (actualLocation) {
-      setStartLoc(actualLocation);
-      setStartQuery("My Location");
-      setIsCustomStart(false);
+    // Restore saved pin just in case it was lost
+    if (!startLoc) {
+      const savedPinData = localStorage.getItem(PERSISTENCE_KEY);
+      if (savedPinData) {
+          try {
+            const parsed = JSON.parse(savedPinData);
+            setStartLoc(parsed);
+            setStartQuery(`${parsed[0].toFixed(4)}, ${parsed[1].toFixed(4)}`);
+          } catch(e) {}
+      }
     }
-    localStorage.removeItem(PERSISTENCE_KEY);
     
     // 6. Logik Apabila Butang PAUSE / PANGKAH (X) Ditekan
     if (isSystemBridgeActive) {
@@ -683,10 +687,6 @@ export default function App() {
               (pos) => {
                 const latlng: [number, number] = [pos.coords.latitude, pos.coords.longitude];
                 setRealLocation(latlng);
-                setStartLoc(latlng);
-                setStartQuery("My Location");
-                setIsCustomStart(false);
-                setPreMockRealLocation(latlng);
                 // focusing map back to real location happens via isFollowingGPS
               },
               () => {
@@ -896,7 +896,7 @@ export default function App() {
           // Feature 2: Arrival Logic
           setIsRunning(false);
           
-          if (isSystemBridgeActive) {
+          if (isSystemBridgeActive && (window as any).Capacitor) {
             const { MockLocation } = (window as any).Capacitor.Plugins;
             MockLocation.finishNotification({ title: 'Mock GPS rr', text: 'You have reached your destination. Now Mock your Location to destination.' }).catch(console.warn);
           } else {
@@ -930,7 +930,7 @@ export default function App() {
 
         // Send push notification every 5 seconds
         if (jitterTimerRef.current % 5 === 0) {
-          if (isSystemBridgeActive) {
+          if (isSystemBridgeActive && (window as any).Capacitor) {
              const remainingDist = Math.max(0, totalRouteDistance - nextD);
              const remainingSecs = Math.max(0, Math.round(remainingDist / (effectiveSpeed / 3.6)));
              const m = Math.floor(remainingSecs / 60);
@@ -2192,7 +2192,7 @@ export default function App() {
                         <button 
                             onClick={async () => {
                                 setShowSetupGuide(false);
-                                if (isSystemBridgeActive) {
+                                if ((window as any).Capacitor) {
                                   try {
                                     const { MockLocation } = (window as any).Capacitor.Plugins;
                                     await MockLocation.openDeveloperOptions();
