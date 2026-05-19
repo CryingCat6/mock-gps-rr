@@ -92,6 +92,9 @@ const endIcon = new L.Icon({
 export interface MockLocationPlugin {
   setMockLocation(options: { latitude: number; longitude: number }): Promise<{ status: string }>;
   stopMockLocation(): Promise<{ status: string }>;
+  updateNotification(options: { title: string; text: string }): Promise<void>;
+  finishNotification(options: { title: string; text: string }): Promise<void>;
+  addListener(eventName: 'onMockStopped', listenerFunc: (info: any) => void): any;
 }
 const MockLocation = registerPlugin<MockLocationPlugin>('MockLocation');
 
@@ -121,6 +124,57 @@ const Text = ({ children, style, ...props }: any) => (
   <div style={style} {...props}>{children}</div>
 );
 
+function MapFitBounds({ bounds, center }: { bounds?: any, center?: any }) {
+  const map = useMap();
+  useEffect(() => {
+    if (bounds) {
+      // Small timeout to allow container to size before fitting
+      setTimeout(() => {
+        map.invalidateSize();
+        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+      }, 50);
+    } else if (center) {
+      map.setView(center, 13);
+    }
+  }, [map, bounds, center]);
+  return null;
+}
+
+function PresetMapPreview({ preset, activeLayer }: { preset: any, activeLayer: string }) {
+  const isRoute = preset.endLoc && (preset.startLoc[0] !== preset.endLoc[0] || preset.startLoc[1] !== preset.endLoc[1]);
+  const bounds: any = isRoute ? [preset.startLoc, preset.endLoc] : undefined;
+  
+  return (
+    <MapContainer 
+      center={preset.startLoc} 
+      zoom={14} 
+      zoomControl={false} 
+      dragging={false} 
+      touchZoom={false} 
+      scrollWheelZoom={false}
+      doubleClickZoom={false}
+      boxZoom={false}
+      keyboard={false}
+      attributionControl={false}
+      style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0 }}
+    >
+      <MapFitBounds bounds={bounds} center={!isRoute ? preset.startLoc : undefined} />
+      <TileLayer
+        url={activeLayer === 'satellite' ? 'https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}' : 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}'}
+      />
+      
+      {preset.routeCoords && preset.routeCoords.length > 0 ? (
+        <Polyline positions={preset.routeCoords} color={COLORS.BLUE} weight={4} opacity={0.8} />
+      ) : isRoute ? (
+        <Polyline positions={[preset.startLoc, preset.endLoc]} color={COLORS.BLUE} weight={3} dashArray="5, 10" opacity={0.6} />
+      ) : null}
+
+      <Marker position={preset.startLoc} icon={startIcon} />
+      {isRoute && <Marker position={preset.endLoc} icon={endIcon} />}
+    </MapContainer>
+  );
+}
+
 export default function App() {
   const [mode, setMode] = useState<AppMode>('IDLE');
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -140,7 +194,7 @@ export default function App() {
   // Persistence Key
   const PERSISTENCE_KEY = 'MOCK_GPS_LAST_PIN';
 
-  const [presets, setPresets] = useState<{id: string, name: string, startLoc: [number, number], endLoc: [number, number], startQuery: string, endQuery: string, vehicle: any}[]>([]);
+  const [presets, setPresets] = useState<{id: string, name: string, startLoc: [number, number], endLoc: [number, number], startQuery: string, endQuery: string, vehicle: any, routeCoords?: [number, number][]}[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
   const [isPresetsOpen, setIsPresetsOpen] = useState(false);
 
@@ -209,6 +263,17 @@ export default function App() {
     // Detect if we're in a native bridge that can handle system GPS mocking
     const isMockBridge = (window as any).AndroidMockBridge || (window as any).Capacitor || (window as any).Cordova;
     setIsSystemBridgeActive(!!isMockBridge);
+    
+    if (isMockBridge && (window as any).Capacitor) {
+      const { MockLocation } = (window as any).Capacitor.Plugins;
+      if (MockLocation?.addListener) {
+        MockLocation.addListener('onMockStopped', () => {
+          setIsRunning(false);
+          setIsPaused(false);
+          setMode('IDLE');
+        });
+      }
+    }
   }, []);
 
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -732,7 +797,8 @@ export default function App() {
       endLoc: endLoc || locationToSave,
       startQuery: startQuery || "Pinned Location",
       endQuery: endQuery || startQuery || "Pinned Location",
-      vehicle
+      vehicle,
+      routeCoords: routes?.[selectedRouteIdx]?.coordinates
     };
     
     // Save to local state and storage
@@ -822,7 +888,6 @@ export default function App() {
            else if (trafficLevel === 'medium') effectiveSpeed *= 0.55; // 45% slowdown
         }
 
-        // Feature 1: Use effectiveSpeed for movement calculation
         const distanceToAdd = (effectiveSpeed / 3.6);
         
         const nextD = prev + distanceToAdd;
@@ -831,16 +896,21 @@ export default function App() {
           // Feature 2: Arrival Logic
           setIsRunning(false);
           
-          // Trigger Arrival Notification
-          if ("Notification" in window && Notification.permission === "granted") {
-            new Notification("Mock GPS RR Explorer", { 
-              body: "Bro, you have safely arrived at your destination!",
-              icon: '/icon.png',
-              tag: 'arrival'
-            });
+          if (isSystemBridgeActive && (window as any).Capacitor) {
+            const { MockLocation } = (window as any).Capacitor.Plugins;
+            MockLocation.finishNotification({ title: 'Mock GPS rr', text: 'You have reached your destination. Now Mock your Location to destination.' }).catch(console.warn);
           } else {
-            setNotification("Bro, you have safely arrived!");
-            setTimeout(() => setNotification(null), 3000);
+            // Trigger Arrival Notification HTML5
+            if ("Notification" in window && Notification.permission === "granted") {
+              new Notification("Mock GPS RR Explorer", { 
+                body: "Bro, you have safely arrived at your destination!",
+                icon: '/icon.png',
+                tag: 'arrival'
+              });
+            } else {
+              setNotification("Bro, you have safely arrived!");
+              setTimeout(() => setNotification(null), 3000);
+            }
           }
 
           // Seamless Transition to Static Mock Mode
@@ -857,6 +927,20 @@ export default function App() {
           
           return totalRouteDistance; // Stay at destination calculation
         }
+
+        // Send push notification every 5 seconds
+        if (jitterTimerRef.current % 5 === 0) {
+          if (isSystemBridgeActive && (window as any).Capacitor) {
+             const remainingDist = Math.max(0, totalRouteDistance - nextD);
+             const remainingSecs = Math.max(0, Math.round(remainingDist / (effectiveSpeed / 3.6)));
+             const m = Math.floor(remainingSecs / 60);
+             const s = remainingSecs % 60;
+             const etaText = m > 0 ? `ETA: ${m}m ${s}s` : `ETA: ${s}s`;
+             const { MockLocation } = (window as any).Capacitor.Plugins;
+             MockLocation.updateNotification({ title: 'Mock GPS rr', text: etaText }).catch(console.warn);
+          }
+        }
+
         return nextD;
       });
     }, 1000); 
@@ -1649,8 +1733,8 @@ export default function App() {
             </div>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, padding: '0 8px' }}>
-                <Text style={{ fontSize: '20px', fontWeight: '800', color: COLORS.TEXT_DARK }}>
-                    {presets.length > 0 ? 'My Saved Locations' : 'No Saved Routes'}
+                <Text style={{ fontSize: '20px', fontWeight: '500', color: '#202124' }}>
+                    {presets.length > 0 ? 'Saved Locations' : 'No Saved Routes'}
                 </Text>
             </div>
 
@@ -1658,8 +1742,8 @@ export default function App() {
                 <div 
                   onPointerDownCapture={e => e.stopPropagation()}
                   style={{ 
-                  display: 'flex', 
-                  flexDirection: 'column', 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(2, 1fr)', 
                   gap: 12, 
                   overflowY: 'auto',
                   paddingBottom: 40,
@@ -1670,31 +1754,34 @@ export default function App() {
                         key={p.id}
                         onClick={(e) => { e.stopPropagation(); loadPreset(p); setIsPresetsOpen(false); }}
                         style={{ 
-                          background: 'white',
-                          padding: '16px',
-                          borderRadius: 20,
+                          background: '#fff',
+                          borderRadius: 16,
                           display: 'flex',
-                          alignItems: 'center',
-                          gap: 12,
-                          boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
-                          cursor: 'pointer'
+                          flexDirection: 'column',
+                          border: '1px solid #dadce0',
+                          cursor: 'pointer',
+                          position: 'relative',
+                          overflow: 'hidden',
+                          padding: '0px'
                         }}
                       >
-                        <div style={{ width: 44, height: 44, borderRadius: 12, background: '#fef9c3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <Star size={22} color="#eab308" fill="#eab308" />
+                        <div style={{ width: '100%', aspectRatio: '1 / 1', background: '#f8f9fa', position: 'relative', overflow: 'hidden', borderBottom: '1px solid #dadce0' }}>
+                          <PresetMapPreview preset={p} activeLayer={activeLayer} />
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); deletePreset(p.id); }}
+                            style={{ 
+                              position: 'absolute', top: 8, right: 8, zIndex: 10,
+                              width: 26, height: 26, borderRadius: 13, background: '#fff', 
+                              border: '1px solid #dadce0', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              boxShadow: '0 1px 2px rgba(60,64,67,0.3)'
+                            }}
+                          >
+                            <X size={14} color="#3c4043" strokeWidth={2} />
+                          </button>
                         </div>
-                        <div style={{ flex: 1 }}>
-                          <Text style={{ fontSize: '15px', fontWeight: '700', display: 'block', color: COLORS.TEXT_DARK }}>{p.name}</Text>
-                          <Text style={{ fontSize: '12px', color: COLORS.TEXT_GREY, display: 'block', maxWidth: '200px' }} className="truncate">
-                            {p.endQuery}
-                          </Text>
+                        <div style={{ padding: '12px 12px', textAlign: 'left' }}>
+                          <Text style={{ fontSize: '14px', fontWeight: '500', display: 'block', color: '#3c4043' }} className="truncate">{p.name}</Text>
                         </div>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); deletePreset(p.id); }}
-                          style={{ width: 32, height: 32, borderRadius: 16, background: '#fee2e2', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        >
-                          <X size={14} color={COLORS.RED} />
-                        </button>
                       </div>
                     ))}
                 </div>
@@ -1732,16 +1819,6 @@ export default function App() {
                             </Text>
                         </div>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <div style={{ 
-                                padding: '6px 12px', borderRadius: '12px', 
-                                background: isSystemBridgeActive ? '#f0fdf4' : '#fff7ed',
-                                border: `1px solid ${isSystemBridgeActive ? '#bcf0da' : '#ffedd5'}`,
-                                flexShrink: 0
-                            }}>
-                                <Text style={{ fontSize: '11px', fontWeight: '700', color: isSystemBridgeActive ? COLORS.GREEN : '#f97316' }}>
-                                    {isSystemBridgeActive ? 'BRIDGE ACTIVE' : 'LITE MODE'}
-                                </Text>
-                            </div>
                             <button 
                                 onClick={resetApp}
                                 style={{ 
@@ -2082,7 +2159,7 @@ export default function App() {
                 }}
             >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-                    <Text style={{ fontSize: '22px', fontWeight: 'bold', color: COLORS.TEXT_DARK }}>Android Setup Guide</Text>
+                    <Text style={{ fontSize: '22px', fontWeight: 'bold', color: COLORS.TEXT_DARK }}>How to Setup</Text>
                     <button onClick={() => setShowSetupGuide(false)} style={{ background: COLORS.SECONDARY, border: 'none', width: 32, height: 32, borderRadius: 16 }}><X size={18} /></button>
                 </div>
 
@@ -2098,36 +2175,37 @@ export default function App() {
                     <div style={{ display: 'flex', gap: 16 }}>
                         <div style={{ width: 28, height: 28, borderRadius: 14, background: COLORS.BLUE, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 'bold' }}>2</div>
                         <div>
-                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>App Tak Keluar Dalam List?</Text>
-                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>
-                                Tool <span style={{ fontWeight: '600' }}>Web-to-APK</span> biasa selalunya tak masukkan permission <span style={{ color: COLORS.RED }}>ALLOW_MOCK_LOCATION</span> dalam AndroidManifest.xml.
-                                <br/><br/>
-                                Untuk "Direct Mock", app ini perlukan <span style={{ fontWeight: '600' }}>Capacitor / Cordova</span> build.
-                            </Text>
+                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>Select Mock Location App</Text>
+                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>Go to <span style={{ fontWeight: '600' }}>Developer Options</span>. Find <span style={{ fontWeight: '600' }}>"Select mock location app"</span> and select <span style={{ fontWeight: '600' }}>Mock GPS RR</span>.</Text>
                         </div>
                     </div>
 
                     <div style={{ display: 'flex', gap: 16 }}>
                         <div style={{ width: 28, height: 28, borderRadius: 14, background: COLORS.BLUE, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 'bold' }}>3</div>
                         <div>
-                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>Cara Guna "Web Simulation"</Text>
-                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>Buat masa ni, app ni berfungsi dalam browser/APK sebagai simulator. Untuk mock sistem telefon, anda perlukan build yang ada <span style={{ fontWeight: '600' }}>Native GPS Bridge</span>.</Text>
+                            <Text style={{ fontWeight: 'bold', fontSize: '15px' }}>Start Mocking</Text>
+                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, marginTop: 4 }}>Pick your fake location or route on the map, then tap the start button. Enjoy!</Text>
                         </div>
                     </div>
 
-                    <div style={{ background: '#fef3f3', padding: 16, borderRadius: 16, marginTop: 12, border: '1px solid #fee2e2' }}>
-                        <Text style={{ fontSize: '12px', color: '#b91c1c', lineHeight: '1.5', fontWeight: '500' }}>
-                           <Activity size={12} style={{ display: 'inline', marginRight: 4 }} /> 
-                           Sila pastikan APK builder anda menyokong custom AndroidManifest.xml dan masukkan permission yang saya telah sediakan di dalam metadata.
-                        </Text>
+                    <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+                        <button 
+                            onClick={async () => {
+                                setShowSetupGuide(false);
+                                if ((window as any).Capacitor) {
+                                  try {
+                                    const { MockLocation } = (window as any).Capacitor.Plugins;
+                                    await MockLocation.openDeveloperOptions();
+                                  } catch (e) {
+                                    console.log(e);
+                                  }
+                                }
+                            }}
+                            style={{ flex: 1, height: 48, background: COLORS.BLUE, color: 'white', borderRadius: 24, border: 'none', fontWeight: 'bold' }}
+                        >
+                            Open Settings
+                        </button>
                     </div>
-
-                    <button 
-                        onClick={() => setShowSetupGuide(false)}
-                        style={{ width: '100%', height: 48, background: COLORS.BLUE, color: 'white', borderRadius: 24, border: 'none', fontWeight: 'bold', marginTop: 12 }}
-                    >
-                        GOT IT
-                    </button>
                 </div>
             </motion.div>
           </div>

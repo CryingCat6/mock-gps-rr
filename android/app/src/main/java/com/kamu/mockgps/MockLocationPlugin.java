@@ -1,6 +1,9 @@
 package com.kamu.mockgps;
 
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.BroadcastReceiver;
 import android.location.Location;
 import android.location.LocationManager;
 import android.os.Build;
@@ -20,6 +23,34 @@ public class MockLocationPlugin extends Plugin {
     private Runnable mockLocationRunnable;
     private Double currentLatitude;
     private Double currentLongitude;
+    private BroadcastReceiver stopReceiver;
+
+    @Override
+    public void load() {
+        super.load();
+        stopReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if ("com.kamu.mockgps.STOP_MOCKING".equals(intent.getAction())) {
+                    stopMockingInternally();
+                    
+                    Intent serviceIntent = new Intent(getContext(), MockLocationService.class);
+                    getContext().stopService(serviceIntent);
+                    
+                    JSObject ret = new JSObject();
+                    ret.put("stoppedByNotification", true);
+                    notifyListeners("onMockStopped", ret);
+                }
+            }
+        };
+        
+        IntentFilter filter = new IntentFilter("com.kamu.mockgps.STOP_MOCKING");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getContext().registerReceiver(stopReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            getContext().registerReceiver(stopReceiver, filter);
+        }
+    }
 
     @PluginMethod
     public void setMockLocation(PluginCall call) {
@@ -36,6 +67,19 @@ public class MockLocationPlugin extends Plugin {
 
         try {
             Context context = getContext();
+            
+            // Start Foreground Service to keep app alive
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent serviceIntent = new Intent(context, MockLocationService.class);
+                serviceIntent.setAction("START");
+                serviceIntent.putExtra("title", "Mock GPS rr");
+                serviceIntent.putExtra("text", "Running...");
+                context.startForegroundService(serviceIntent);
+            } else {
+                Intent serviceIntent = new Intent(context, MockLocationService.class);
+                serviceIntent.setAction("START");
+                context.startService(serviceIntent);
+            }
             LocationManager locationManager = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
             
             String[] providers = {
@@ -114,9 +158,51 @@ public class MockLocationPlugin extends Plugin {
     @PluginMethod
     public void stopMockLocation(PluginCall call) {
         stopMockingInternally();
+        
+        Intent serviceIntent = new Intent(getContext(), MockLocationService.class);
+        getContext().stopService(serviceIntent);
+
         JSObject ret = new JSObject();
         ret.put("status", "Mock location dihentikan");
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void updateNotification(PluginCall call) {
+        String title = call.getString("title", "Mock GPS rr");
+        String text = call.getString("text", "Running...");
+        
+        Intent serviceIntent = new Intent(getContext(), MockLocationService.class);
+        serviceIntent.setAction("UPDATE");
+        serviceIntent.putExtra("title", title);
+        serviceIntent.putExtra("text", text);
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getContext().startForegroundService(serviceIntent);
+        } else {
+            getContext().startService(serviceIntent);
+        }
+        
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void finishNotification(PluginCall call) {
+        String title = call.getString("title", "Mock GPS rr");
+        String text = call.getString("text", "You have reached your destination.");
+        
+        Intent serviceIntent = new Intent(getContext(), MockLocationService.class);
+        serviceIntent.setAction("FINISH_NOTIFICATION");
+        serviceIntent.putExtra("title", title);
+        serviceIntent.putExtra("text", text);
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getContext().startForegroundService(serviceIntent);
+        } else {
+            getContext().startService(serviceIntent);
+        }
+        
+        call.resolve();
     }
 
     private void stopMockingInternally() {
@@ -138,12 +224,18 @@ public class MockLocationPlugin extends Plugin {
             
             for (String providerName : providers) {
                 try {
-                    // Try to clear everything
+                    // Important: Clear the last known location and disable the test provider before removing it
+                    locationManager.clearTestProviderLocation(providerName);
+                } catch (Exception e) {}
+                try {
+                    locationManager.clearTestProviderEnabled(providerName);
+                } catch (Exception e) {}
+                try {
                     locationManager.setTestProviderEnabled(providerName, false);
+                } catch (Exception e) {}
+                try {
                     locationManager.removeTestProvider(providerName);
-                } catch (Exception e) {
-                    // Ignore if not found or cannot be removed
-                }
+                } catch (Exception e) {}
             }
         } catch (Exception e) {
             // Context/System service fails
@@ -153,8 +245,33 @@ public class MockLocationPlugin extends Plugin {
         currentLongitude = null;
     }
 
+    @PluginMethod
+    public void openDeveloperOptions(PluginCall call) {
+        try {
+            android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS);
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            // Intent not found (developer options not enabled), fallback to general settings
+            try {
+                android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_SETTINGS);
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(intent);
+                call.resolve();
+            } catch (Exception e2) {
+                call.reject("Could not open settings");
+            }
+        }
+    }
+
     @Override
     protected void handleOnDestroy() {
+        if (stopReceiver != null) {
+            try {
+                getContext().unregisterReceiver(stopReceiver);
+            } catch (Exception e) {}
+        }
         stopMockingInternally();
         super.handleOnDestroy();
     }
