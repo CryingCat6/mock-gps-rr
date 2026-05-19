@@ -116,11 +116,11 @@ public class MockLocationPlugin extends Plugin {
             for (String providerName : providers) {
                 try {
                     try {
-                        locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 1);
+                        locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 2);
                     } catch (IllegalArgumentException e) {
                         try {
                             locationManager.removeTestProvider(providerName);
-                            locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 1);
+                            locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 2);
                         } catch (Exception ex) {}
                     }
                     locationManager.setTestProviderEnabled(providerName, true);
@@ -139,23 +139,14 @@ public class MockLocationPlugin extends Plugin {
                     mockLocation.setLatitude(currentLatitude);
                     mockLocation.setLongitude(currentLongitude);
                     mockLocation.setAltitude(3.0);
-                    mockLocation.setSpeed(5.0f);
-                    mockLocation.setBearing(1.0f);
-                    mockLocation.setAccuracy(3.0f);
+                    mockLocation.setSpeed(0.0f);
+                    mockLocation.setBearing(0.0f);
+                    mockLocation.setAccuracy(1.0f);
                     mockLocation.setTime(System.currentTimeMillis());
                     
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
                         mockLocation.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
                     }
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        mockLocation.setBearingAccuracyDegrees(0.1f);
-                        mockLocation.setVerticalAccuracyMeters(0.1f);
-                        mockLocation.setSpeedAccuracyMetersPerSecond(0.01f);
-                    }
-                    
-                    Bundle extras = new Bundle();
-                    extras.putInt("satellites", 12);
-                    mockLocation.setExtras(extras);
 
                     // Try to push it to the system
                     locationManager.setTestProviderLocation(providerName, mockLocation);
@@ -175,23 +166,14 @@ public class MockLocationPlugin extends Plugin {
                                     mockLocation.setLatitude(currentLatitude);
                                     mockLocation.setLongitude(currentLongitude);
                                     mockLocation.setAltitude(3.0);
-                                    mockLocation.setSpeed(5.0f);
-                                    mockLocation.setBearing(1.0f);
-                                    mockLocation.setAccuracy(3.0f);
+                                    mockLocation.setSpeed(0.0f);
+                                    mockLocation.setBearing(0.0f);
+                                    mockLocation.setAccuracy(1.0f);
                                     mockLocation.setTime(System.currentTimeMillis());
                                     
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
                                         mockLocation.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
                                     }
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                        mockLocation.setBearingAccuracyDegrees(0.1f);
-                                        mockLocation.setVerticalAccuracyMeters(0.1f);
-                                        mockLocation.setSpeedAccuracyMetersPerSecond(0.01f);
-                                    }
-                                    
-                                    Bundle extras = new Bundle();
-                                    extras.putInt("satellites", 12);
-                                    mockLocation.setExtras(extras);
                                     
                                     // Try to push it to the system
                                     locationManager.setTestProviderLocation(providerName, mockLocation);
@@ -200,7 +182,7 @@ public class MockLocationPlugin extends Plugin {
                                 }
                             }
                         }
-                        handler.postDelayed(this, 300); // Repeat every 300ms fallback
+                        handler.postDelayed(this, 1000); // Repeat every 1 second
                     }
                 };
                 handler.post(mockLocationRunnable);
