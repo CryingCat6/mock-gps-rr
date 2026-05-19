@@ -5,7 +5,7 @@ import {
   Layers, X, Activity, Target, ArrowLeft,
   ArrowUpDown, Car, Plane, Loader2, Dot,
   Play, Pause, Menu, Settings, Coffee, Instagram, ExternalLink,
-  LocateFixed, Bike, Footprints
+  LocateFixed, Bike, Footprints, Star, Github
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MapContainer, TileLayer, Marker, Polyline, useMap, useMapEvents } from 'react-leaflet';
@@ -126,7 +126,7 @@ export default function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isMockingStatic, setIsMockingStatic] = useState(false);
-  const [activeLayer, setActiveLayer] = useState<'plain' | 'satellite'>('plain');
+  const [activeLayer, setActiveLayer] = useState<'plain' | 'satellite' | 'hybrid'>('plain');
   const [isFollowingGPS, setIsFollowingGPS] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -140,9 +140,26 @@ export default function App() {
   // Persistence Key
   const PERSISTENCE_KEY = 'MOCK_GPS_LAST_PIN';
 
+  const [presets, setPresets] = useState<{id: string, name: string, startLoc: [number, number], endLoc: [number, number], startQuery: string, endQuery: string, vehicle: any}[]>([]);
+  const [notification, setNotification] = useState<string | null>(null);
+  const [isPresetsOpen, setIsPresetsOpen] = useState(false);
+
+  const [isCustomStart, setIsCustomStart] = useState(false);
+
   // 1. LOGIK MASA MULA BUKA APP (Init App Setup)
   useEffect(() => {
+    // Request notification permission
+    if ("Notification" in window && Notification.permission !== "granted") {
+      Notification.requestPermission();
+    }
+
     const initializeAppLocation = async () => {
+      // Load Presets
+      const savedPresets = localStorage.getItem('MOCK_GPS_PRESETS');
+      if (savedPresets) {
+        try { setPresets(JSON.parse(savedPresets)); } catch (e) { console.warn(e); }
+      }
+
       // Get saved pin from storage
       const savedPinData = localStorage.getItem(PERSISTENCE_KEY);
       
@@ -151,42 +168,35 @@ export default function App() {
           const parsedLocation = JSON.parse(savedPinData);
           setStartLoc(parsedLocation);
           setStartQuery(`${parsedLocation[0].toFixed(4)}, ${parsedLocation[1].toFixed(4)}`);
+          setIsCustomStart(true);
         } catch (e) {
-          setStartLoc(realLocation);
+          if (realLocation) {
+            setStartLoc(realLocation);
+            setStartQuery("My Location");
+          }
         }
-      } else {
-        // NEW USER: Default Pin to real location
+      } else if (realLocation) {
         setStartLoc(realLocation);
         setStartQuery("My Location");
       }
     };
 
     initializeAppLocation();
-  }, [realLocation]); // Run when realLocation is first detected
+    // Only run once on mount OR when realLocation is first detected
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!realLocation]);
 
   // 2. LOGIK SETIAP KALI TUKAR MODE (Location vs Route)
   useEffect(() => {
-    // KEHENDAK MOCK ROUTE: By default Pin Biru wajib paksa ikut GPS original
-    if ((mode === 'SETTING_UP' || mode === 'SELECTING_ROUTE' || mode === 'ACTIVE') && realLocation) {
-      setStartLoc(realLocation);
-      setStartQuery("My Location");
-    } else if (mode === 'IDLE' || mode === 'MOCKING_LOCATION') {
-      // Jika tukar balik ke Single Mock Location, panggil balik sejarah pin lama dari storage
-      const savedPinData = localStorage.getItem(PERSISTENCE_KEY);
-      if (savedPinData != null) {
-        try {
-          const parsed = JSON.parse(savedPinData);
-          setStartLoc(parsed);
-          setStartQuery(`${parsed[0].toFixed(4)}, ${parsed[1].toFixed(4)}`);
-        } catch (e) { /* ignore */ }
-      }
-    }
+    // We no longer force state changes here to avoid fighting with user interactions
+    // Mode transitions are handled explicitly in handleModeSwitch and doSwitchMode
   }, [mode, realLocation]);
 
   // 4. LOGIK APABILA USER MENGUBAH PIN BIRU MANUAL
   const handleUpdateBluePinManual = (newCoords: [number, number]) => {
     setStartLoc(newCoords);
     setStartQuery(`${newCoords[0].toFixed(4)}, ${newCoords[1].toFixed(4)}`);
+    setIsCustomStart(true);
     // Simpan terus ke memori telefon supaya stay kat situ
     localStorage.setItem(PERSISTENCE_KEY, JSON.stringify(newCoords));
   };
@@ -208,6 +218,9 @@ export default function App() {
     onConfirm: () => void;
   }>({ show: false, title: '', message: '', onConfirm: () => {} });
 
+  const [savePromptOpen, setSavePromptOpen] = useState(false);
+  const [savePromptName, setSavePromptName] = useState("");
+
   // REAL LOCATION DETECTION
   useEffect(() => {
     let watchId: number;
@@ -222,9 +235,6 @@ export default function App() {
           // (because if we are mocking, the system reports the mock as the position)
           if (!isRunning) {
             setRealLocation([lat, lng]);
-            if (isFollowingGPS && mode === 'IDLE') {
-              setStartLoc([lat, lng]);
-            }
           }
         },
         (error) => console.warn("Geolocation watch error:", error),
@@ -257,8 +267,57 @@ export default function App() {
 
   const [routes, setRoutes] = useState<RouteInfo[]>([]);
   const [selectedRouteIdx, setSelectedRouteIdx] = useState(0);
+
+  // Helper to check if current location/route is favorited
+  const isFavorited = useMemo(() => {
+    const sLoc = startLoc || realLocation;
+    if (!sLoc || presets.length === 0) return false;
+    
+    return presets.some(p => {
+      try {
+        const pStart = L.latLng(p.startLoc);
+        const currStart = L.latLng(sLoc);
+        const startMatch = pStart.distanceTo(currStart) < 75; // Increased tolerance
+        
+        if (endLoc) {
+          const pEnd = L.latLng(p.endLoc);
+          const currEnd = L.latLng(endLoc);
+          return startMatch && pEnd.distanceTo(currEnd) < 75;
+        } else {
+          // Check if preset is also a point mock
+          return startMatch && L.latLng(p.startLoc).distanceTo(L.latLng(p.endLoc)) < 10;
+        }
+      } catch (e) { return false; }
+    });
+  }, [presets, startLoc, realLocation, endLoc]);
+
+  const toggleFavorite = () => {
+    const sLoc = startLoc || realLocation;
+    if (!sLoc) return;
+    
+    if (isFavorited) {
+      const toDelete = presets.find(p => {
+        try {
+          const startMatch = L.latLng(p.startLoc).distanceTo(sLoc) < 75;
+          if (endLoc) return startMatch && L.latLng(p.endLoc).distanceTo(endLoc) < 75;
+          return startMatch && L.latLng(p.startLoc).distanceTo(L.latLng(p.endLoc)) < 10;
+        } catch (e) { return false; }
+      });
+      
+      if (toDelete) {
+        deletePreset(toDelete.id);
+        setNotification("Removed Bookmark");
+        setTimeout(() => setNotification(null), 1200);
+      }
+    } else {
+      setSavePromptName(endLoc ? "My Route" : "My Location");
+      setSavePromptOpen(true);
+    }
+  };
   const [vehicle, setVehicle] = useState<'car' | 'motor' | 'walk' | 'flight'>('car');
   const [currentSpeed, setCurrentSpeed] = useState(80);
+  const [jitteredSpeed, setJitteredSpeed] = useState(80); // Init with default currentSpeed
+  const jitterTimerRef = useRef(0);
 
   const speedConfig = {
     walk: { min: 1, max: 9, default: 5 },
@@ -390,13 +449,15 @@ export default function App() {
 
   // Engineering Fix 2: Multi-Mode Routing (Road vs Flight)
   const lastCalcRef = useRef<string>("");
+  const isInitialSpeedSetRef = useRef<boolean>(false);
+  const trafficCacheRef = useRef<any>({});
 
   const calculateRoutes = async (targetEnd: [number, number], customStart?: [number, number], targetVehicle?: 'car' | 'motor' | 'walk' | 'flight') => {
     const origin = customStart || startLoc;
     if (!origin) return;
     
     const vMode = targetVehicle || vehicle;
-    const cacheKey = `${origin[0]},${origin[1]}-${targetEnd[0]},${targetEnd[1]}-${vMode}`;
+    const cacheKey = `${origin[0].toFixed(5)},${origin[1].toFixed(5)}-${targetEnd[0].toFixed(5)},${targetEnd[1].toFixed(5)}-${vMode}`;
     if (lastCalcRef.current === cacheKey) return;
     lastCalcRef.current = cacheKey;
 
@@ -414,7 +475,10 @@ export default function App() {
                   origin[1] + (targetEnd[1] - origin[1]) * (i / steps)
               ]);
           }
-          const traffic = generateTraffic(coords, dist / 40, vMode);
+          if (!trafficCacheRef.current[cacheKey]) {
+             trafficCacheRef.current[cacheKey] = generateTraffic(coords, dist / 40, vMode);
+          }
+          const traffic = trafficCacheRef.current[cacheKey];
           setRoutes([{
               distance: dist,
               duration: dist / 40,
@@ -426,8 +490,11 @@ export default function App() {
           setTotalRouteDistance(dist);
           setSelectedRouteIdx(0);
           setMode('SELECTING_ROUTE');
-          // Initialize speed to default for the vehicle
-          setCurrentSpeed(speedConfig.flight.default);
+          // Initialize speed to default for the vehicle ONLY if we are arriving freshly
+          if (!isInitialSpeedSetRef.current) {
+             setCurrentSpeed(speedConfig.flight.default);
+             isInitialSpeedSetRef.current = true;
+          }
           setIsLoading(false);
       }, 300);
       return;
@@ -442,7 +509,11 @@ export default function App() {
       if (data.code === 'Ok' && data.routes.length > 0) {
           const r = data.routes[0];
           const coords: [number, number][] = r.geometry.coordinates.map((c: any) => [c[1], c[0]]);
-          const traffic = generateTraffic(coords, r.duration, vMode);
+          
+          if (!trafficCacheRef.current[cacheKey]) {
+             trafficCacheRef.current[cacheKey] = generateTraffic(coords, r.duration, vMode);
+          }
+          const traffic = trafficCacheRef.current[cacheKey];
           
           setRoutes([{
               distance: r.distance,
@@ -456,10 +527,26 @@ export default function App() {
           setSelectedRouteIdx(0);
           setMode('SELECTING_ROUTE');
           // Initialize speed to default for the vehicle
-          setCurrentSpeed(speedConfig[vMode].default);
+          if (!isInitialSpeedSetRef.current) {
+             setCurrentSpeed(speedConfig[vMode].default);
+             isInitialSpeedSetRef.current = true;
+          }
+      } else {
+          console.warn("OSRM routing failed, falling back to direct flight.");
+          setNotification("Route too far, falling back to flight");
+          setTimeout(() => setNotification(null), 3000);
+          setVehicle('flight');
+          lastCalcRef.current = ""; // Reset cache so flight can calculate
+          calculateRoutes(targetEnd, origin, 'flight');
       }
     } catch (err) {
       console.error("Routing error:", err);
+      // Fallback on error
+      setNotification("Network error, falling back to flight");
+      setTimeout(() => setNotification(null), 3000);
+      setVehicle('flight');
+      lastCalcRef.current = "";
+      calculateRoutes(targetEnd, origin, 'flight');
     } finally {
       setIsLoading(false);
     }
@@ -490,7 +577,7 @@ export default function App() {
     } catch (err) {
       console.error("Search failed:", err);
     }
-  }, 150), []);
+  }, 1200), []);
 
   useEffect(() => {
     if (mode === 'SETTING_UP' && endQuery.length > 2) searchWaze(endQuery);
@@ -503,12 +590,25 @@ export default function App() {
     setIsMockingStatic(false);
     setDistanceCovered(0);
     distanceCoveredRef.current = 0;
+    isInitialSpeedSetRef.current = false; // Reset speed lock
 
     setMode('IDLE');
-    setStartLoc(null); // Clear the static mock pin so it snaps back fully
+    // We KEEP the startLoc (pin) so it remembers where user put it last in Static Mock Mode
     setRoutes([]);
     setEndLoc(null);
     setEndQuery("");
+
+    // Restore saved pin just in case it was lost
+    if (!startLoc) {
+      const savedPinData = localStorage.getItem(PERSISTENCE_KEY);
+      if (savedPinData) {
+          try {
+            const parsed = JSON.parse(savedPinData);
+            setStartLoc(parsed);
+            setStartQuery(`${parsed[0].toFixed(4)}, ${parsed[1].toFixed(4)}`);
+          } catch(e) {}
+      }
+    }
     
     // 6. Logik Apabila Butang PAUSE / PANGKAH (X) Ditekan
     if (isSystemBridgeActive) {
@@ -552,10 +652,23 @@ export default function App() {
             setEndLoc(null);
             setEndQuery("");
 
-            // Engineering Fix: Route Mode always starts at current real location
             if (newMode === 'SETTING_UP') {
-              setStartLoc(realLocation);
-              setStartQuery("My Location");
+               // Only reset to GPS if we are not already in setup/route selection
+               if (mode !== 'SETTING_UP' && mode !== 'SELECTING_ROUTE' && mode !== 'ACTIVE') {
+                  setStartLoc(realLocation);
+                  setStartQuery("My Location");
+                  setIsCustomStart(false); 
+               }
+            } else {
+               // Single Point Mock: Load from storage to remember position
+               const savedPinData = localStorage.getItem(PERSISTENCE_KEY);
+               if (savedPinData) {
+                   try {
+                     const parsed = JSON.parse(savedPinData);
+                     setStartLoc(parsed);
+                     setStartQuery(`${parsed[0].toFixed(4)}, ${parsed[1].toFixed(4)}`);
+                   } catch(e) {}
+               }
             }
 
             setMode(newMode);
@@ -579,6 +692,22 @@ export default function App() {
     doSwitch();
   };
 
+  const swapLocations = () => {
+    const sL = startLoc || realLocation;
+    const eL = endLoc;
+    
+    if (sL && eL) {
+      setStartLoc(eL);
+      setEndLoc(sL);
+      
+      const sQ = startQuery;
+      const eQ = endQuery;
+      setStartQuery(eQ || "Pinned Location");
+      setEndQuery(sQ || "Pinned Location");
+      setIsCustomStart(true);
+    }
+  };
+
   const getTrafficLevelAt = useCallback((index: number) => {
     if (!selectedRoute) return 'low';
     let count = 0;
@@ -591,13 +720,82 @@ export default function App() {
     return 'low';
   }, [selectedRoute]);
 
+  const saveRouteAsPreset = (name: string) => {
+    // Determine the actual focused location to save
+    const locationToSave = startLoc || realLocation;
+    if (!locationToSave) return;
+
+    const newPreset = {
+      id: Date.now().toString(),
+      name,
+      startLoc: locationToSave,
+      endLoc: endLoc || locationToSave,
+      startQuery: startQuery || "Pinned Location",
+      endQuery: endQuery || startQuery || "Pinned Location",
+      vehicle
+    };
+    
+    // Save to local state and storage
+    setPresets(prev => {
+      const updated = [...prev, newPreset];
+      localStorage.setItem('MOCK_GPS_PRESETS', JSON.stringify(updated));
+      return updated;
+    });
+
+    setNotification("Saved to Bookmarks!");
+    setTimeout(() => setNotification(null), 1500);
+  };
+
+  const deletePreset = (id: string) => {
+    setPresets(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      localStorage.setItem('MOCK_GPS_PRESETS', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const loadPreset = (preset: any) => {
+    setStartLoc(preset.startLoc);
+    setEndLoc(preset.endLoc);
+    setStartQuery(preset.startQuery);
+    setEndQuery(preset.endQuery);
+    setVehicle(preset.vehicle);
+    setIsCustomStart(true);
+    setIsPresetsOpen(false); // CLOSE THE DRAWER SO WE CAN SEE THE ROUTES/PREVIEW
+    
+    // Force recalculate cache reset
+    lastCalcRef.current = "";
+    isInitialSpeedSetRef.current = false; // Allow speed reset for new preset
+    
+    // Logic: If start and end are the same, it's a single point mock
+    if (JSON.stringify(preset.startLoc) === JSON.stringify(preset.endLoc)) {
+      setMode('MOCKING_LOCATION');
+      setRoutes([]);
+      setSelectedRouteIdx(0);
+      setIsMockingStatic(true);
+      setIsRunning(false); // Reset to ready state
+    } else {
+      setMode('SETTING_UP');
+      calculateRoutes(preset.endLoc, preset.startLoc, preset.vehicle);
+    }
+  };
+
   // BACKGROUND SIMULATION SERVICE (1-SECOND TICK FOR STABILITY)
   useEffect(() => {
     if (!isRunning || isPaused || !selectedRoute) {
+      setJitteredSpeed(currentSpeed);
+      jitterTimerRef.current = 0;
       return;
     }
 
     const intervalId = setInterval(() => {
+      // Feature 1: Speed Jitter logic
+      jitterTimerRef.current += 1;
+      if (jitterTimerRef.current % 2 === 0) {
+        const deviation = (Math.random() * 14) - 7; // -7 to +7 km/h
+        setJitteredSpeed(currentSpeed + deviation);
+      }
+
       setDistanceCovered(prev => {
         // Find traffic level at current distance to adjust speed
         let d = 0;
@@ -615,17 +813,37 @@ export default function App() {
         }
         
         setCurrentIndex(activeIndex);
+        
+        // Feature 1: Traffic-Aware speed simulation
+        let effectiveSpeed = jitteredSpeed;
+        if (vehicle === 'car') {
+           const trafficLevel = getTrafficLevelAt(activeIndex);
+           if (trafficLevel === 'high') effectiveSpeed *= 0.25; // 75% slowdown
+           else if (trafficLevel === 'medium') effectiveSpeed *= 0.55; // 45% slowdown
+        }
 
-        // Required speed to finish exactly in the exact ETA without traffic slow-downs
-        // user requested "if 2 minit please smpai 2 minit thats all" 
-        // 1 second tick = distanceToAdd is exactly speed in m/s
-        const distanceToAdd = (currentSpeed / 3.6);
+        // Feature 1: Use effectiveSpeed for movement calculation
+        const distanceToAdd = (effectiveSpeed / 3.6);
         
         const nextD = prev + distanceToAdd;
 
         if (nextD >= totalRouteDistance) {
+          // Feature 2: Arrival Logic
           setIsRunning(false);
-          // Wait briefly, then convert directly to static mock location at destination
+          
+          // Trigger Arrival Notification
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification("Mock GPS RR Explorer", { 
+              body: "Bro, you have safely arrived at your destination!",
+              icon: '/icon.png',
+              tag: 'arrival'
+            });
+          } else {
+            setNotification("Bro, you have safely arrived!");
+            setTimeout(() => setNotification(null), 3000);
+          }
+
+          // Seamless Transition to Static Mock Mode
           setTimeout(() => {
             if (selectedRoute) {
               const destCoords = selectedRoute.coordinates[selectedRoute.coordinates.length - 1];
@@ -635,15 +853,16 @@ export default function App() {
               setIsMockingStatic(true);
               setRoutes([]);
             }
-          }, 0);
+          }, 500);
+          
           return totalRouteDistance; // Stay at destination calculation
         }
         return nextD;
       });
-    }, 1000); // Strictly 1 update per second for stable GPS spoofing
+    }, 1000); 
 
     return () => clearInterval(intervalId);
-  }, [isRunning, isPaused, selectedRoute, currentSpeed, totalRouteDistance, getTrafficLevelAt]);
+  }, [isRunning, isPaused, selectedRoute, currentSpeed, jitteredSpeed, totalRouteDistance, getTrafficLevelAt]);
 
   return (
     <div style={{ height: '100vh', width: '100vw', position: 'relative', background: '#e5e3df', overflow: 'hidden', fontFamily: 'system-ui' }}>
@@ -651,18 +870,26 @@ export default function App() {
       {/* MAP ENGINE */}
       <div style={{ flex: 1, position: 'absolute', inset: 0 }}>
         <MapContainer center={currentCoords} zoom={14} style={{ height: '100%', width: '100%' }} zoomControl={false}>
-          {/* Engineering Fix 4 & 5: Business names preserved via explicit TileLayer */}
+          {/* Engineering Fix 4 & 5: Official Google Maps Tile Engine */}
           {activeLayer === 'plain' ? (
             <TileLayer 
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution="osm"
+              url="https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}"
+              subdomains={['mt0', 'mt1', 'mt2', 'mt3']}
+              attribution="&copy; Google Maps"
+              // Engineering Note: User-agent is managed by the browser/environment to prevent blocking
+            />
+          ) : activeLayer === 'satellite' ? (
+            <TileLayer 
+              url="https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+              subdomains={['mt0', 'mt1', 'mt2', 'mt3']}
+              attribution="&copy; Google Maps"
             />
           ) : (
-            <>
-              <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
-              {/* Hybrid Overlay for Street Names */}
-              <TileLayer url="https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}" opacity={0.8} />
-            </>
+            <TileLayer 
+              url="https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+              subdomains={['mt0', 'mt1', 'mt2', 'mt3']}
+              attribution="&copy; Google Maps"
+            />
           )}
           
           {/* Traffic-Aware Polyline Rendering */}
@@ -858,7 +1085,7 @@ export default function App() {
             initial={{ y: -200 }} animate={{ y: 0 }} exit={{ y: -200 }}
             style={{ 
               position: 'fixed', 
-              top: 'calc(env(safe-area-inset-top, 24px) + 32px)', 
+              top: 'calc(env(safe-area-inset-top, 24px) + 6px)', 
               left: 12, 
               right: 12, 
               zIndex: 1000 
@@ -870,7 +1097,12 @@ export default function App() {
                     <div style={{ display: 'flex', gap: 8, flex: 1, justifyContent: 'center' }}>
                         {(['car', 'motor', 'walk', 'flight'] as const).map(v => (
                             <button 
-                                key={v} onClick={() => setVehicle(v)}
+                                key={v} onClick={() => {
+                                   if (vehicle !== v) {
+                                      isInitialSpeedSetRef.current = false;
+                                      setVehicle(v);
+                                   }
+                                }}
                                 style={{ 
                                     padding: '8px 12px', borderRadius: 20, border: 'none',
                                     background: vehicle === v ? '#E8F0FE' : 'transparent',
@@ -890,27 +1122,43 @@ export default function App() {
                 
                 <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {/* Transit Connection Line */}
-                    <div style={{ position: 'absolute', left: 10, top: 22, bottom: 22, width: 2, borderLeft: '2px dotted #ccc' }} />
+                    <div style={{ position: 'absolute', left: 20, top: 22, bottom: 22, width: 2, borderLeft: '2px dotted #ccc' }} />
                     
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: COLORS.SECONDARY, padding: '0 12px', borderRadius: 12, height: 48 }}>
-                        <MapPin size={18} color={COLORS.BLUE} />
+                    {/* Engineering Fix: Swap Button */}
+                    <button 
+                      onClick={swapLocations}
+                      style={{ 
+                        position: 'absolute', right: 50, top: '50%', transform: 'translateY(-50%)',
+                        zIndex: 10, background: 'white', border: `1px solid ${COLORS.BORDER}`,
+                        width: 32, height: 32, borderRadius: 16, display: 'flex', 
+                        alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <ArrowUpDown size={16} color={COLORS.BLUE} />
+                    </button>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: COLORS.SECONDARY, padding: '0 12px', borderRadius: 12, height: 48, paddingRight: 40 }}>
+                        <div style={{ width: 18, display: 'flex', justifyContent: 'center' }}>
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', border: `2px solid ${COLORS.BLUE}`, background: 'white' }} />
+                        </div>
                         <input 
-                            style={{ flex: 1, border: 'none', background: 'none', outline: 'none', fontSize: '16px' }} 
+                            style={{ flex: 1, border: 'none', background: 'none', outline: 'none', fontSize: '15px', color: COLORS.TEXT_DARK, fontWeight: '500' }} 
                             value={startQuery} 
                             onChange={e => setStartQuery(e.target.value)}
                         />
-                         <button onClick={() => setPickingMode('start')} style={{ background: 'none', border: 'none' }}><MapPin size={18} color={COLORS.BLUE} /></button>
+                         <button onClick={() => setPickingMode('start')} style={{ background: 'none', border: 'none', padding: 4 }}><MapPin size={18} color={COLORS.BLUE} /></button>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: COLORS.SECONDARY, padding: '0 12px', borderRadius: 12, height: 48 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: COLORS.SECONDARY, padding: '0 12px', borderRadius: 12, height: 48, paddingRight: 40 }}>
                         <MapPin size={18} color={COLORS.RED} />
                         <input 
-                            style={{ flex: 1, border: 'none', background: 'none', outline: 'none', fontSize: '16px' }} 
+                            style={{ flex: 1, border: 'none', background: 'none', outline: 'none', fontSize: '15px', color: COLORS.TEXT_DARK, fontWeight: '500' }} 
                             placeholder="Destination (Lat, Lon)"
                             value={endQuery} 
                             onChange={e => setEndQuery(e.target.value)}
                         />
-                        <button onClick={() => setPickingMode('end')} style={{ background: 'none', border: 'none' }}><MapPin size={18} color={COLORS.RED} /></button>
+                        <button onClick={() => setPickingMode('end')} style={{ background: 'none', border: 'none', padding: 4 }}><MapPin size={18} color={COLORS.RED} /></button>
                     </div>
                 </div>
 
@@ -938,17 +1186,20 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* IDLE SEARCH BAR */}
+      {/* IDLE SEARCH BAR & PRESETS */}
       {mode === 'IDLE' && (
         <motion.div 
           initial={{ opacity: 0 }} 
           animate={{ opacity: 1 }} 
           style={{ 
             position: 'fixed', 
-            top: 'calc(env(safe-area-inset-top, 24px) + 36px)', 
+            top: 'calc(env(safe-area-inset-top, 24px) + 6px)', 
             left: 16, 
             right: 16, 
-            zIndex: 1000 
+            zIndex: 1000,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12
           }}
         >
             <div style={{ background: 'white', height: 48, borderRadius: 24, boxShadow: '0 2px 4px rgba(0,0,0,0.2), 0 0 1px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', padding: '0 12px', gap: 8 }}>
@@ -970,6 +1221,40 @@ export default function App() {
             </div>
         </motion.div>
       )}
+
+      {/* Feature 2: Toast Notification Overlay */}
+      <AnimatePresence>
+        {notification && (
+          <motion.div
+            initial={{ y: -50, opacity: 0 }}
+            animate={{ y: 20, opacity: 1 }}
+            exit={{ y: -50, opacity: 0 }}
+            style={{
+              position: 'fixed',
+              top: 'env(safe-area-inset-top, 20px)',
+              left: 40,
+              right: 40,
+              zIndex: 9999,
+              display: 'flex',
+              justifyContent: 'center'
+            }}
+          >
+            <div style={{
+              background: 'white',
+              color: COLORS.TEXT_DARK,
+              padding: '16px 24px',
+              borderRadius: 30,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+              fontSize: '14px',
+              fontWeight: '600',
+              textAlign: 'center',
+              border: `2px solid ${COLORS.BLUE}`
+            }}>
+              {notification}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Engineering Fix 10: Google-style Pin Picking Toast */}
       <AnimatePresence>
@@ -1062,9 +1347,17 @@ export default function App() {
             <button 
                 onClick={() => {
                     if (mapContext.latlng) {
+                        // SET DESTINATION
                         setEndLoc([mapContext.latlng[0], mapContext.latlng[1]]);
                         setEndQuery(`${mapContext.latlng[0].toFixed(4)}, ${mapContext.latlng[1].toFixed(4)}`);
-                        // DO NOT reset startLoc here if it's already set or custom
+                        
+                        // Logic: If starting a fresh route setup from another mode, default start to original GPS
+                        if (mode !== 'SETTING_UP' && mode !== 'SELECTING_ROUTE' && mode !== 'ACTIVE') {
+                            setStartLoc(realLocation);
+                            setStartQuery("My Location");
+                            setIsCustomStart(false);
+                        }
+                        
                         setMode('SETTING_UP'); 
                         setMapContext({ show: false, latlng: null, point: null });
                     }
@@ -1118,6 +1411,70 @@ export default function App() {
                   style={{ background: COLORS.BLUE, border: 'none', color: 'white', fontWeight: 'bold', padding: '8px 24px', borderRadius: 20 }}
                 >
                   PROCEED
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* SAVE PROMPT DIALOG */}
+      <AnimatePresence>
+        {savePromptOpen && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }}
+              onClick={() => setSavePromptOpen(false)}
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              style={{
+                position: 'relative',
+                background: 'white',
+                width: '100%',
+                maxWidth: 320,
+                borderRadius: 24,
+                padding: '24px',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+              }}
+            >
+              <Text style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: 8, display: 'block' }}>Save Bookmark</Text>
+              <Text style={{ fontSize: '14px', color: COLORS.TEXT_GREY, lineHeight: '1.5', display: 'block', marginBottom: 16 }}>
+                Enter a name for this location or route.
+              </Text>
+              
+              <input
+                type="text"
+                value={savePromptName}
+                onChange={e => setSavePromptName(e.target.value)}
+                placeholder="e.g. Home, Office, Fav-Route"
+                autoFocus
+                style={{
+                  width: '100%', padding: '12px 16px', borderRadius: 12, border: `1px solid ${COLORS.BORDER}`,
+                  marginBottom: 24, fontSize: '16px', outline: 'none'
+                }}
+              />
+
+              <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+                <button 
+                  onClick={() => setSavePromptOpen(false)}
+                  style={{ background: 'none', border: 'none', color: COLORS.TEXT_GREY, fontWeight: 'bold', padding: '8px 16px' }}
+                >
+                  CANCEL
+                </button>
+                <button 
+                  onClick={() => {
+                    if (savePromptName.trim()) {
+                      saveRouteAsPreset(savePromptName.trim());
+                      setSavePromptOpen(false);
+                    }
+                  }}
+                  style={{ background: COLORS.BLUE, border: 'none', color: 'white', fontWeight: 'bold', padding: '8px 24px', borderRadius: 20 }}
+                >
+                  SAVE
                 </button>
               </div>
             </motion.div>
@@ -1214,31 +1571,46 @@ export default function App() {
                   <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
                     <div style={{ height: 1.5, background: COLORS.BORDER, margin: '8px 0' }} />
                     
-                    <div style={{ background: '#FFF7E6', padding: '16px', borderRadius: 16, border: '1px solid #FFE7B8', display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <div style={{ background: '#FF9900', width: 40, height: 40, borderRadius: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div 
+                      onClick={() => window.open('https://linktr.ee/rafiridzuan', '_blank')}
+                      style={{ background: '#E6F4EA', padding: '16px', borderRadius: 16, border: '1px solid #CEEAD6', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}
+                    >
+                      <div style={{ background: '#34A853', width: 40, height: 40, borderRadius: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Coffee size={20} color="white" />
                       </div>
                       <div style={{ flex: 1 }}>
-                        <Text style={{ fontWeight: 'bold', fontSize: '14px' }}>Buy Me a Coffee</Text>
-                        <Text style={{ fontSize: '12px', color: COLORS.TEXT_GREY }}>Support the developer</Text>
+                        <Text style={{ fontWeight: 'bold', fontSize: '14px', color: '#137333' }}>Buy Me a Matcha</Text>
                       </div>
-                      <ExternalLink size={16} color={COLORS.TEXT_GREY} />
+                      <ExternalLink size={16} color="#137333" />
                     </div>
 
                     <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                      <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY }}>Made with ❤️ by <span style={{ fontWeight: 'bold', color: COLORS.TEXT_DARK }}>Rafi Ridzuan</span></Text>
-                      <button 
-                        onClick={() => window.open('https://instagram.com/rafiridzuan', '_blank')}
-                        style={{ 
-                          marginTop: 12, background: 'linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%)',
-                          border: 'none', borderRadius: 12, height: 44, width: '100%', color: 'white', fontWeight: 'bold',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
-                        }}
-                      >
-                        <Instagram size={20} />
-                        <Text>@rafiridzuan</Text>
-                      </button>
-                      <Text style={{ fontSize: '11px', color: COLORS.TEXT_GREY, marginTop: 16 }}>Version 1.12</Text>
+                      <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY }}>Made by <span style={{ fontWeight: 'bold', color: COLORS.TEXT_DARK }}>Rafi Ridzuan</span></Text>
+                      <div style={{ display: 'flex', gap: 12, marginTop: 12 }}>
+                        <button 
+                          onClick={() => window.open('https://instagram.com/rafiridzuan', '_blank')}
+                          style={{ 
+                            background: 'linear-gradient(45deg, #f09433 0%,#e6683c 25%,#dc2743 50%,#cc2366 75%,#bc1888 100%)',
+                            border: 'none', borderRadius: 12, height: 44, flex: 1, color: 'white', fontWeight: 'bold',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer'
+                          }}
+                        >
+                          <Instagram size={18} />
+                          <Text style={{ fontSize: '12px' }}>@rafiridzuan</Text>
+                        </button>
+                        <button 
+                          onClick={() => window.open('https://github.com/CryingCat6', '_blank')}
+                          style={{ 
+                            background: '#24292e',
+                            border: 'none', borderRadius: 12, height: 44, flex: 1, color: 'white', fontWeight: 'bold',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer'
+                          }}
+                        >
+                          <Github size={18} />
+                          <Text style={{ fontSize: '12px' }}>@CryingCat6</Text>
+                        </button>
+                      </div>
+                      <Text style={{ fontSize: '11px', color: COLORS.TEXT_GREY, marginTop: 16 }}>Version 1.33</Text>
                     </div>
                   </div>
                 </div>
@@ -1248,8 +1620,94 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Engineering Fix 5: Draggable Bottom Sheet (Material 3 Style) */}
+      {/* Persistent Saved Routes Drawer */}
       <AnimatePresence>
+        {mode === 'IDLE' && (
+          <motion.div 
+            initial={false} 
+            animate={{ y: isPresetsOpen ? 0 : (window.innerHeight * 0.55) - 110 }}
+            transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+            drag="y"
+            dragElastic={0.1}
+            dragConstraints={{ top: 0, bottom: (window.innerHeight * 0.55) - 110 }}
+            onDragEnd={(e, info) => {
+              if (info.offset.y < -30 || info.velocity.y < -300) setIsPresetsOpen(true);
+              else if (info.offset.y > 30 || info.velocity.y > 300) setIsPresetsOpen(false);
+            }}
+            style={{ 
+                position: 'fixed', bottom: 0, left: 0, right: 0, 
+                background: COLORS.SECONDARY, borderTopLeftRadius: 32, borderTopRightRadius: 32, 
+                padding: '12px 16px 40px', zIndex: 2000,
+                boxShadow: '0 -10px 40px rgba(0,0,0,0.2)',
+                height: window.innerHeight * 0.55,
+                display: 'flex',
+                flexDirection: 'column'
+            }}
+          >
+            <div style={{ paddingBottom: 16, paddingTop: 4, cursor: 'grab' }} onClick={() => presets.length > 0 && setIsPresetsOpen(!isPresetsOpen)}>
+                <div style={{ width: 45, height: 5, background: '#cbd5e1', borderRadius: 3, margin: '0 auto' }} />
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, padding: '0 8px' }}>
+                <Text style={{ fontSize: '20px', fontWeight: '800', color: COLORS.TEXT_DARK }}>
+                    {presets.length > 0 ? 'My Saved Locations' : 'No Saved Routes'}
+                </Text>
+            </div>
+
+            {presets.length > 0 ? (
+                <div 
+                  onPointerDownCapture={e => e.stopPropagation()}
+                  style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: 12, 
+                  overflowY: 'auto',
+                  paddingBottom: 40,
+                  touchAction: 'pan-y'
+                }}>
+                    {presets.map(p => (
+                      <div 
+                        key={p.id}
+                        onClick={(e) => { e.stopPropagation(); loadPreset(p); setIsPresetsOpen(false); }}
+                        style={{ 
+                          background: 'white',
+                          padding: '16px',
+                          borderRadius: 20,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 12,
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <div style={{ width: 44, height: 44, borderRadius: 12, background: '#fef9c3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Star size={22} color="#eab308" fill="#eab308" />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <Text style={{ fontSize: '15px', fontWeight: '700', display: 'block', color: COLORS.TEXT_DARK }}>{p.name}</Text>
+                          <Text style={{ fontSize: '12px', color: COLORS.TEXT_GREY, display: 'block', maxWidth: '200px' }} className="truncate">
+                            {p.endQuery}
+                          </Text>
+                        </div>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); deletePreset(p.id); }}
+                          style={{ width: 32, height: 32, borderRadius: 16, background: '#fee2e2', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                        >
+                          <X size={14} color={COLORS.RED} />
+                        </button>
+                      </div>
+                    ))}
+                </div>
+            ) : (
+                <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+                  <Text style={{ fontSize: '14px', color: COLORS.TEXT_GREY }}>
+                    Tap the star icon during setup to save a route here.
+                  </Text>
+                </div>
+            )}
+          </motion.div>
+        )}
+
         {(mode === 'SELECTING_ROUTE' || mode === 'ACTIVE' || mode === 'MOCKING_LOCATION') && (
           <motion.div 
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
@@ -1263,32 +1721,56 @@ export default function App() {
             <div style={{ width: 36, height: 4, background: '#ccc', borderRadius: 2, margin: '0 auto 16px' }} />
             
             {mode === 'MOCKING_LOCATION' && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20, position: 'relative' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div>
-                            <Text style={{ fontSize: '18px', fontWeight: 'bold', color: COLORS.TEXT_DARK }}>
-                                Static Mock Location
+                            <Text style={{ fontSize: '20px', fontWeight: '800', color: COLORS.TEXT_DARK }}>
+                                Static Mocking
                             </Text>
-                            <Text style={{ fontSize: '14px', color: isRunning ? COLORS.GREEN : COLORS.TEXT_GREY }}>
-                                {isRunning ? 'Currently Mocking' : 'Ready to start'}
-                            </Text>
-                        </div>
-                        <div style={{ 
-                            padding: '4px 8px', borderRadius: '4px', 
-                            background: isSystemBridgeActive ? 'rgba(76, 175, 80, 0.1)' : 'rgba(255, 152, 0, 0.1)',
-                            border: `1px solid ${isSystemBridgeActive ? COLORS.GREEN : '#FF9800'}`,
-                            flexShrink: 0
-                        }}>
-                            <Text style={{ fontSize: '10px', fontWeight: 'bold', color: isSystemBridgeActive ? COLORS.GREEN : '#FF9800' }}>
-                                {isSystemBridgeActive ? 'SYSTEM BRIDGE ACTIVE' : 'WEB SIMULATION'}
+                            <Text style={{ fontSize: '14px', color: isRunning ? COLORS.GREEN : COLORS.TEXT_GREY, fontWeight: '500' }}>
+                                {isRunning ? 'Avatar pinned at destination' : 'Ready to start'}
                             </Text>
                         </div>
-                        <button 
-                            onClick={resetApp}
-                            style={{ width: 40, height: 40, borderRadius: 20, background: COLORS.SECONDARY, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                        >
-                            <X size={20} color={COLORS.TEXT_DARK} />
-                        </button>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <div style={{ 
+                                padding: '6px 12px', borderRadius: '12px', 
+                                background: isSystemBridgeActive ? '#f0fdf4' : '#fff7ed',
+                                border: `1px solid ${isSystemBridgeActive ? '#bcf0da' : '#ffedd5'}`,
+                                flexShrink: 0
+                            }}>
+                                <Text style={{ fontSize: '11px', fontWeight: '700', color: isSystemBridgeActive ? COLORS.GREEN : '#f97316' }}>
+                                    {isSystemBridgeActive ? 'BRIDGE ACTIVE' : 'LITE MODE'}
+                                </Text>
+                            </div>
+                            <button 
+                                onClick={resetApp}
+                                style={{ 
+                                    width: 36, height: 36, 
+                                    borderRadius: 18, background: '#fee2e2', border: 'none',
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                }}
+                            >
+                                <X size={20} color={COLORS.RED} />
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style={{ 
+                        background: '#f8fafc', 
+                        padding: '16px', 
+                        borderRadius: '20px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: 12,
+                        border: '1px solid #e2e8f0'
+                    }}>
+                        <div style={{ width: 44, height: 44, borderRadius: 22, background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
+                            <Target size={22} color={COLORS.BLUE} />
+                        </div>
+                        <div style={{ flex: 1 }}>
+                            <Text style={{ fontSize: '13px', color: COLORS.TEXT_GREY, display: 'block' }}>Active Position</Text>
+                            <Text style={{ fontSize: '14px', fontWeight: '600', color: COLORS.TEXT_DARK }}>{startLoc ? `${startLoc[0].toFixed(5)}, ${startLoc[1].toFixed(5)}` : 'Picking location...'}</Text>
+                        </div>
                     </div>
 
                     <div style={{ display: 'flex', gap: 12 }}>
@@ -1312,27 +1794,24 @@ export default function App() {
                             }}
                         >
                             {isRunning ? (
-                                <><Pause size={24} /> PAUSE</>
+                                <><Pause size={24} /> STOP MOCK</>
                             ) : (
-                                <><Play size={24} /> START</>
+                                <><Play size={24} /> START MOCK</>
                             )}
                         </button>
-
+                        
                         <button 
-                            onClick={() => {
-                                if (startLoc) {
-                                  navigator.clipboard.writeText(`${startLoc[0]}, ${startLoc[1]}`);
-                                  // Simple alert feedback
-                                  alert(`Copied: ${startLoc[0]}, ${startLoc[1]}`);
-                                }
-                            }}
+                            onClick={toggleFavorite}
                             style={{ 
                                 width: 54, height: 54, borderRadius: 27, 
-                                background: COLORS.SECONDARY, border: 'none', 
-                                display: 'flex', alignItems: 'center', justifyContent: 'center' 
+                                background: isFavorited ? '#fef9c3' : COLORS.SECONDARY, 
+                                border: isFavorited ? `2px solid #eab308` : 'none', 
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                transition: 'all 0.2s',
+                                boxShadow: isFavorited ? '0 4px 12px rgba(234, 179, 8, 0.2)' : 'none'
                             }}
                         >
-                            <Target size={24} color={COLORS.BLUE} />
+                            <Star size={24} color={isFavorited ? "#eab308" : COLORS.TEXT_GREY} fill={isFavorited ? "#eab308" : "none"} />
                         </button>
 
                         <button 
@@ -1341,23 +1820,15 @@ export default function App() {
                                 setStartQuery("My Location");
                                 setPickingMode(null);
                             }}
-                            style={{ 
-                                width: 54, height: 54, borderRadius: 27, 
-                                background: COLORS.SECONDARY, border: 'none', 
-                                display: 'flex', alignItems: 'center', justifyContent: 'center' 
-                            }}
+                            style={{ width: 54, height: 54, borderRadius: 27, background: COLORS.SECONDARY, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                         >
                             <LocateFixed size={24} color={COLORS.BLUE} />
                         </button>
                     </div>
-                    
-                    <Text style={{ fontSize: '12px', color: COLORS.TEXT_GREY, textAlign: 'center' }}>
-                        {isRunning 
-                            ? (isSystemBridgeActive ? 'GPS System Mocking is LIVE' : 'Simulating in app. For system-wide mock, build as Native APK.') 
-                            : 'Click map or search for target location'}
-                    </Text>
                 </div>
             )}
+
+            {/* Hidden Spacer */}
 
             {mode === 'SELECTING_ROUTE' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1367,8 +1838,10 @@ export default function App() {
                               <div style={{ fontSize: '20px', fontWeight: 'bold', color: COLORS.TEXT_DARK }}>
                                   {((selectedRoute?.distance || 0)/1000).toFixed(1)} km
                               </div>
-                              <div style={{ fontSize: '14px', color: COLORS.RED, fontWeight: '500' }}>
-                                  {selectedRoute && selectedRoute.durationWithTraffic > selectedRoute.duration * 1.2 ? (
+                               <div style={{ fontSize: '14px', color: COLORS.RED, fontWeight: '500' }}>
+                                  {vehicle !== 'car' ? (
+                                    <span style={{ color: COLORS.TEXT_GREY }}>No traffic delay for {vehicle === 'motor' ? 'Motor' : vehicle === 'walk' ? 'Walking' : 'Flight'}</span>
+                                  ) : selectedRoute && selectedRoute.durationWithTraffic > selectedRoute.duration * 1.2 ? (
                                     <span>Heavy Traffic delay included</span>
                                   ) : selectedRoute && selectedRoute.durationWithTraffic > selectedRoute.duration * 1.05 ? (
                                     <span>Slight traffic delay</span>
@@ -1411,21 +1884,40 @@ export default function App() {
                         </div>
                     </div>
 
-                    <button 
-                        onClick={() => { 
-                          setPreMockRealLocation(realLocation);
-                          setMode('ACTIVE'); 
-                          setIsRunning(true); 
-                          setIsPaused(false);
-                          setCurrentIndex(0); 
-                          setDistanceCovered(0);
-                          distanceCoveredRef.current = 0;
-                          setIsFollowingGPS(true);
-                        }}
-                        style={{ height: 54, background: COLORS.BLUE, borderRadius: 27, color: 'white', border: 'none', fontSize: '18px', fontWeight: 'bold' }}
-                    >
-                        START {vehicle.toUpperCase()}
-                    </button>
+                    <div style={{ display: 'flex', gap: 12, position: 'relative' }}>
+                        <button 
+                            onClick={() => { 
+                              setPreMockRealLocation(realLocation);
+                              setMode('ACTIVE'); 
+                              setIsRunning(true); 
+                              setIsPaused(false);
+                              setCurrentIndex(0); 
+                              setDistanceCovered(0);
+                              distanceCoveredRef.current = 0;
+                              setIsFollowingGPS(true);
+                            }}
+                            style={{ flex: 1, height: 54, background: COLORS.BLUE, borderRadius: 27, color: 'white', border: 'none', fontSize: '18px', fontWeight: 'bold' }}
+                        >
+                            START {vehicle.toUpperCase()}
+                        </button>
+                        <button 
+                            onClick={toggleFavorite}
+                            style={{ 
+                                width: 54, 
+                                height: 54, 
+                                borderRadius: 27, 
+                                background: isFavorited ? '#fef9c3' : COLORS.SECONDARY, 
+                                border: isFavorited ? `2px solid #eab308` : 'none', 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'center',
+                                boxShadow: isFavorited ? '0 4px 12px rgba(234, 179, 8, 0.2)' : 'none',
+                                transition: 'all 0.2s'
+                            }}
+                        >
+                            <Star size={24} color={isFavorited ? "#eab308" : COLORS.TEXT_GREY} fill={isFavorited ? "#eab308" : "none"} />
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -1545,7 +2037,11 @@ export default function App() {
 
       {/* Layer Toggle */}
       <button 
-        onClick={() => setActiveLayer(activeLayer === 'plain' ? 'satellite' : 'plain')}
+        onClick={() => {
+          if (activeLayer === 'plain') setActiveLayer('satellite');
+          else if (activeLayer === 'satellite') setActiveLayer('hybrid');
+          else setActiveLayer('plain');
+        }}
         style={{ 
             position: 'fixed', right: 20, bottom: (mode === 'SELECTING_ROUTE' || mode === 'ACTIVE') ? 285 : 165, 
             width: 48, height: 48, borderRadius: 24, background: 'white', 
