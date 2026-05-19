@@ -113,24 +113,48 @@ public class MockLocationPlugin extends Plugin {
                 "fused"
             };
             
-            for (String providerName : providers) {
+            try {
                 try {
-                    try {
-                        locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 2);
-                    } catch (IllegalArgumentException e) {
-                        try {
-                            locationManager.removeTestProvider(providerName);
-                            locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 2);
-                        } catch (Exception ex) {}
-                    }
-                    locationManager.setTestProviderEnabled(providerName, true);
-                } catch (SecurityException e) {
-                    call.reject("Sila aktifkan app ini di Developer Options -> Select mock location app dahulu!");
-                    return;
-                } catch (Exception e) {
-                    // Ignore other errors for specific providers
+                   locationManager.addTestProvider(LocationManager.GPS_PROVIDER, false, true, false, false, true, true, true, 1, 1);
+                } catch (IllegalArgumentException e) {
+                   locationManager.removeTestProvider(LocationManager.GPS_PROVIDER);
+                   locationManager.addTestProvider(LocationManager.GPS_PROVIDER, false, true, false, false, true, true, true, 1, 1);
                 }
-            }
+                locationManager.setTestProviderEnabled(LocationManager.GPS_PROVIDER, true);
+            } catch (SecurityException e) {
+                call.reject("Sila aktifkan app ini di Developer Options -> Select mock location app dahulu!");
+                return;
+            } catch (Exception e) {}
+
+            try {
+                try {
+                   locationManager.addTestProvider(LocationManager.NETWORK_PROVIDER, true, false, true, false, false, false, false, 1, 2);
+                } catch (IllegalArgumentException e) {
+                   locationManager.removeTestProvider(LocationManager.NETWORK_PROVIDER);
+                   locationManager.addTestProvider(LocationManager.NETWORK_PROVIDER, true, false, true, false, false, false, false, 1, 2);
+                }
+                locationManager.setTestProviderEnabled(LocationManager.NETWORK_PROVIDER, true);
+            } catch (Exception e) {}
+            
+            try {
+                try {
+                   locationManager.addTestProvider(LocationManager.PASSIVE_PROVIDER, false, false, false, false, false, false, false, 1, 2);
+                } catch (IllegalArgumentException e) {
+                   locationManager.removeTestProvider(LocationManager.PASSIVE_PROVIDER);
+                   locationManager.addTestProvider(LocationManager.PASSIVE_PROVIDER, false, false, false, false, false, false, false, 1, 2);
+                }
+                locationManager.setTestProviderEnabled(LocationManager.PASSIVE_PROVIDER, true);
+            } catch (Exception e) {}
+
+            try {
+                try {
+                   locationManager.addTestProvider("fused", false, false, false, false, true, true, true, 1, 1);
+                } catch (IllegalArgumentException e) {
+                   locationManager.removeTestProvider("fused");
+                   locationManager.addTestProvider("fused", false, false, false, false, true, true, true, 1, 1);
+                }
+                locationManager.setTestProviderEnabled("fused", true);
+            } catch (Exception e) {}
 
             // Push immediately
             for (String providerName : providers) {
@@ -146,6 +170,11 @@ public class MockLocationPlugin extends Plugin {
                     
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
                         mockLocation.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        mockLocation.setBearingAccuracyDegrees(0.1f);
+                        mockLocation.setVerticalAccuracyMeters(0.1f);
+                        mockLocation.setSpeedAccuracyMetersPerSecond(0.01f);
                     }
 
                     // Try to push it to the system
@@ -173,6 +202,11 @@ public class MockLocationPlugin extends Plugin {
                                     
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
                                         mockLocation.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+                                    }
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        mockLocation.setBearingAccuracyDegrees(0.1f);
+                                        mockLocation.setVerticalAccuracyMeters(0.1f);
+                                        mockLocation.setSpeedAccuracyMetersPerSecond(0.01f);
                                     }
                                     
                                     // Try to push it to the system
