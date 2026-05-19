@@ -114,20 +114,15 @@ public class MockLocationPlugin extends Plugin {
             
             for (String providerName : providers) {
                 try {
-                    if (locationManager.getProvider(providerName) != null) {
+                    try {
+                        locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 1);
+                    } catch (IllegalArgumentException e) {
                         try {
-                            locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 2, 2);
-                        } catch (IllegalArgumentException e) {
-                            // If it exists, we might need to remove and re-add to be sure
-                            try {
-                                locationManager.removeTestProvider(providerName);
-                                locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 2, 2);
-                            } catch (Exception ex) {
-                                // Ignore
-                            }
-                        }
-                        locationManager.setTestProviderEnabled(providerName, true);
+                            locationManager.removeTestProvider(providerName);
+                            locationManager.addTestProvider(providerName, false, false, false, false, true, true, true, 1, 1);
+                        } catch (Exception ex) {}
                     }
+                    locationManager.setTestProviderEnabled(providerName, true);
                 } catch (SecurityException e) {
                     call.reject("Sila aktifkan app ini di Developer Options -> Select mock location app dahulu!");
                     return;
@@ -143,13 +138,18 @@ public class MockLocationPlugin extends Plugin {
                     mockLocation.setLatitude(currentLatitude);
                     mockLocation.setLongitude(currentLongitude);
                     mockLocation.setAltitude(3.0);
-                    mockLocation.setSpeed(0.01f);
+                    mockLocation.setSpeed(5.0f);
                     mockLocation.setBearing(1.0f);
-                    mockLocation.setAccuracy(1.0f);
+                    mockLocation.setAccuracy(3.0f);
                     mockLocation.setTime(System.currentTimeMillis());
                     
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
                         mockLocation.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        mockLocation.setBearingAccuracyDegrees(0.1f);
+                        mockLocation.setVerticalAccuracyMeters(0.1f);
+                        mockLocation.setSpeedAccuracyMetersPerSecond(0.01f);
                     }
                     
                     // Try to push it to the system
@@ -170,13 +170,18 @@ public class MockLocationPlugin extends Plugin {
                                     mockLocation.setLatitude(currentLatitude);
                                     mockLocation.setLongitude(currentLongitude);
                                     mockLocation.setAltitude(3.0);
-                                    mockLocation.setSpeed(0.01f);
+                                    mockLocation.setSpeed(5.0f);
                                     mockLocation.setBearing(1.0f);
-                                    mockLocation.setAccuracy(1.0f);
+                                    mockLocation.setAccuracy(3.0f);
                                     mockLocation.setTime(System.currentTimeMillis());
                                     
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
                                         mockLocation.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
+                                    }
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                        mockLocation.setBearingAccuracyDegrees(0.1f);
+                                        mockLocation.setVerticalAccuracyMeters(0.1f);
+                                        mockLocation.setSpeedAccuracyMetersPerSecond(0.01f);
                                     }
                                     
                                     // Try to push it to the system
