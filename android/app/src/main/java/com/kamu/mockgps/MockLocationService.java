@@ -10,22 +10,14 @@ import android.os.Build;
 import android.os.IBinder;
 import androidx.core.app.NotificationCompat;
 
-import android.os.PowerManager;
-
 public class MockLocationService extends Service {
     private static final String CHANNEL_ID = "mock_gps_channel";
     private static final int NOTIFICATION_ID = 199;
-    private PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
-        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
-        if (pm != null) {
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MockGPS::ServiceWakeLock");
-            wakeLock.acquire();
-        }
     }
 
     @Override
@@ -34,7 +26,7 @@ public class MockLocationService extends Service {
         if ("START".equals(action) || "UPDATE".equals(action)) {
             String title = intent.getStringExtra("title");
             String text = intent.getStringExtra("text");
-            if (title == null) title = "mock GPS rr";
+            if (title == null) title = "Mock GPS rr";
             if (text == null) text = "Running...";
 
             Intent notificationIntent = new Intent(this, MainActivity.class);
@@ -87,8 +79,8 @@ public class MockLocationService extends Service {
         } else if ("FINISH_NOTIFICATION".equals(action)) {
             String title = intent.getStringExtra("title");
             String text = intent.getStringExtra("text");
-            if (title == null) title = "You reached your destination.";
-            if (text == null) text = "Now mock your Location in Destination";
+            if (title == null) title = "Mock GPS rr";
+            if (text == null) text = "You have reached your destination.";
 
             Intent notificationIntent = new Intent(this, MainActivity.class);
             notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -114,14 +106,6 @@ public class MockLocationService extends Service {
         }
         
         return START_NOT_STICKY;
-    }
-
-    @Override
-    public void onDestroy() {
-        if (wakeLock != null && wakeLock.isHeld()) {
-            wakeLock.release();
-        }
-        super.onDestroy();
     }
 
     @Override

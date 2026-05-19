@@ -95,8 +95,6 @@ export interface MockLocationPlugin {
   updateNotification(options: { title: string; text: string }): Promise<void>;
   finishNotification(options: { title: string; text: string }): Promise<void>;
   addListener(eventName: 'onMockStopped', listenerFunc: (info: any) => void): any;
-  openDeveloperOptions(): Promise<void>;
-  requestAppPermissions(): Promise<void>;
 }
 const MockLocation = registerPlugin<MockLocationPlugin>('MockLocation');
 
@@ -131,17 +129,12 @@ function MapFitBounds({ bounds, center }: { bounds?: any, center?: any }) {
   useEffect(() => {
     if (bounds) {
       // Small timeout to allow container to size before fitting
-      const t = setTimeout(() => {
+      setTimeout(() => {
         map.invalidateSize();
-        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
-      }, 150);
-      return () => clearTimeout(t);
+        map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+      }, 50);
     } else if (center) {
-      const t = setTimeout(() => {
-        map.invalidateSize();
-        map.setView(center, 15);
-      }, 150);
-      return () => clearTimeout(t);
+      map.setView(center, 13);
     }
   }, [map, bounds, center]);
   return null;
@@ -149,21 +142,8 @@ function MapFitBounds({ bounds, center }: { bounds?: any, center?: any }) {
 
 function PresetMapPreview({ preset, activeLayer }: { preset: any, activeLayer: string }) {
   const isRoute = preset.endLoc && (preset.startLoc[0] !== preset.endLoc[0] || preset.startLoc[1] !== preset.endLoc[1]);
+  const bounds: any = isRoute ? [preset.startLoc, preset.endLoc] : undefined;
   
-  let bounds: any = isRoute ? [preset.startLoc, preset.endLoc] : undefined;
-  
-  if (preset.routeCoords && preset.routeCoords.length > 0) {
-    let minLat = preset.routeCoords[0][0], maxLat = preset.routeCoords[0][0];
-    let minLng = preset.routeCoords[0][1], maxLng = preset.routeCoords[0][1];
-    for (const [lat, lng] of preset.routeCoords) {
-      if (lat < minLat) minLat = lat;
-      if (lat > maxLat) maxLat = lat;
-      if (lng < minLng) minLng = lng;
-      if (lng > maxLng) maxLng = lng;
-    }
-    bounds = [[minLat, minLng], [maxLat, maxLng]];
-  }
-
   return (
     <MapContainer 
       center={preset.startLoc} 
@@ -228,14 +208,6 @@ export default function App() {
     }
 
     const initializeAppLocation = async () => {
-      if (isSystemBridgeActive) {
-        try {
-          await MockLocation.requestAppPermissions();
-        } catch(e) {}
-      } else if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: false, maximumAge: 60000 });
-      }
-
       // Load Presets
       const savedPresets = localStorage.getItem('MOCK_GPS_PRESETS');
       if (savedPresets) {
@@ -293,16 +265,13 @@ export default function App() {
     setIsSystemBridgeActive(!!isMockBridge);
     
     if (isMockBridge) {
-      try {
-        if (MockLocation?.addListener) {
-          MockLocation.addListener('onMockStopped', () => {
-            setIsRunning(false);
-            setIsPaused(false);
-            setMode('IDLE');
-          });
-        }
-      } catch (e) {
-        console.warn('MockLocation plugin not available', e);
+      const { MockLocation } = (window as any).Capacitor.Plugins;
+      if (MockLocation?.addListener) {
+        MockLocation.addListener('onMockStopped', () => {
+          setIsRunning(false);
+          setIsPaused(false);
+          setMode('IDLE');
+        });
       }
     }
   }, []);
@@ -334,7 +303,7 @@ export default function App() {
           }
         },
         (error) => console.warn("Geolocation watch error:", error),
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 5000 }
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
     }
     return () => {
@@ -499,44 +468,26 @@ export default function App() {
     const shouldMock = (isRunning || isArrived) && !isPaused;
     
     if (!shouldMock) {
-      if (isSystemBridgeActive) {
-        MockLocation.stopMockLocation().then(() => {
-          // When we stop mocking, try to refresh our real location from the system
-          if ("geolocation" in navigator) {
-            navigator.geolocation.getCurrentPosition(
-              (pos) => setRealLocation([pos.coords.latitude, pos.coords.longitude]),
-              null,
-              { enableHighAccuracy: true, timeout: 5000, maximumAge: 5000 }
-            );
-          }
-        }).catch((err: any) => console.warn("stopMockLocation error:", err));
-      } else {
+      MockLocation.stopMockLocation().then(() => {
+        // When we stop mocking, try to refresh our real location from the system
         if ("geolocation" in navigator) {
           navigator.geolocation.getCurrentPosition(
             (pos) => setRealLocation([pos.coords.latitude, pos.coords.longitude]),
             null,
-            { enableHighAccuracy: true, timeout: 5000, maximumAge: 5000 }
+            { enableHighAccuracy: true, timeout: 2000 }
           );
         }
-      }
+      }).catch((err: any) => console.warn(err));
       return;
     }
     
     // Call the Android plugin to set mock location
-    if (isSystemBridgeActive) {
-      MockLocation.setMockLocation({
-        latitude: currentCoords[0],
-        longitude: currentCoords[1]
-      }).catch((err: any) => {
-        console.warn("setMockLocation error:", err);
-        // If there's an error setting mock location, likely lack of developer options.
-        setIsRunning(false);
-        setIsPaused(false);
-        setIsMockingStatic(false);
-        setMode('IDLE');
-        setShowSetupGuide(true);
-      });
-    }
+    MockLocation.setMockLocation({
+      latitude: currentCoords[0],
+      longitude: currentCoords[1]
+    }).catch((err: any) => {
+      console.warn("Mock location plugin error:", err);
+    });
   }, [currentCoords, isRunning, isPaused, isSystemBridgeActive]);
 
   // Engineering Fix 3: Remove clunky Done buttons. 
@@ -741,7 +692,7 @@ export default function App() {
               () => {
                 // If it fails, keep the fallback we just set
               },
-              { enableHighAccuracy: true, timeout: 5000, maximumAge: 5000 }
+              { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
             );
           }
       }).catch((err: any) => console.warn(err));
@@ -946,7 +897,8 @@ export default function App() {
           setIsRunning(false);
           
           if (isSystemBridgeActive) {
-            MockLocation.finishNotification({ title: 'You reached your destination.', text: 'Now mock your Location in Destination' }).catch(console.warn);
+            const { MockLocation } = (window as any).Capacitor.Plugins;
+            MockLocation.finishNotification({ title: 'Mock GPS rr', text: 'You have reached your destination. Now Mock your Location to destination.' }).catch(console.warn);
           } else {
             // Trigger Arrival Notification HTML5
             if ("Notification" in window && Notification.permission === "granted") {
@@ -984,7 +936,8 @@ export default function App() {
              const m = Math.floor(remainingSecs / 60);
              const s = remainingSecs % 60;
              const etaText = m > 0 ? `ETA: ${m}m ${s}s` : `ETA: ${s}s`;
-             MockLocation.updateNotification({ title: 'mock GPS rr', text: etaText }).catch(console.warn);
+             const { MockLocation } = (window as any).Capacitor.Plugins;
+             MockLocation.updateNotification({ title: 'Mock GPS rr', text: etaText }).catch(console.warn);
           }
         }
 
@@ -1899,12 +1852,9 @@ export default function App() {
 
                     <div style={{ display: 'flex', gap: 12 }}>
                         <button 
-                            onClick={async () => {
+                            onClick={() => {
                                 if (!isRunning) {
                                   setPreMockRealLocation(realLocation);
-                                  if (isSystemBridgeActive) {
-                                      try { await MockLocation.requestAppPermissions(); } catch(e) {}
-                                  }
                                 }
                                 setIsRunning(!isRunning);
                                 setIsMockingStatic(true);
@@ -2013,11 +1963,8 @@ export default function App() {
 
                     <div style={{ display: 'flex', gap: 12, position: 'relative' }}>
                         <button 
-                            onClick={async () => { 
+                            onClick={() => { 
                               setPreMockRealLocation(realLocation);
-                              if (isSystemBridgeActive) {
-                                  try { await MockLocation.requestAppPermissions(); } catch(e) {}
-                              }
                               setMode('ACTIVE'); 
                               setIsRunning(true); 
                               setIsPaused(false);
@@ -2247,6 +2194,7 @@ export default function App() {
                                 setShowSetupGuide(false);
                                 if (isSystemBridgeActive) {
                                   try {
+                                    const { MockLocation } = (window as any).Capacitor.Plugins;
                                     await MockLocation.openDeveloperOptions();
                                   } catch (e) {
                                     console.log(e);
