@@ -658,22 +658,18 @@ export default function App() {
     isInitialSpeedSetRef.current = false; // Reset speed lock
 
     setMode('IDLE');
-    // We KEEP the startLoc (pin) so it remembers where user put it last in Static Mock Mode
     setRoutes([]);
     setEndLoc(null);
     setEndQuery("");
 
-    // Restore saved pin just in case it was lost
-    if (!startLoc) {
-      const savedPinData = localStorage.getItem(PERSISTENCE_KEY);
-      if (savedPinData) {
-          try {
-            const parsed = JSON.parse(savedPinData);
-            setStartLoc(parsed);
-            setStartQuery(`${parsed[0].toFixed(4)}, ${parsed[1].toFixed(4)}`);
-          } catch(e) {}
-      }
+    // Return to original GPS location when reset
+    const actualLocation = preMockRealLocation || realLocation;
+    if (actualLocation) {
+      setStartLoc(actualLocation);
+      setStartQuery("My Location");
+      setIsCustomStart(false);
     }
+    localStorage.removeItem(PERSISTENCE_KEY);
     
     // 6. Logik Apabila Butang PAUSE / PANGKAH (X) Ditekan
     if (isSystemBridgeActive) {
@@ -687,6 +683,10 @@ export default function App() {
               (pos) => {
                 const latlng: [number, number] = [pos.coords.latitude, pos.coords.longitude];
                 setRealLocation(latlng);
+                setStartLoc(latlng);
+                setStartQuery("My Location");
+                setIsCustomStart(false);
+                setPreMockRealLocation(latlng);
                 // focusing map back to real location happens via isFollowingGPS
               },
               () => {
