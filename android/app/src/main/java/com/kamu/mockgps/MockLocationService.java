@@ -10,14 +10,22 @@ import android.os.Build;
 import android.os.IBinder;
 import androidx.core.app.NotificationCompat;
 
+import android.os.PowerManager;
+
 public class MockLocationService extends Service {
     private static final String CHANNEL_ID = "mock_gps_channel";
     private static final int NOTIFICATION_ID = 199;
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
+        PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+        if (pm != null) {
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MockGPS::ServiceWakeLock");
+            wakeLock.acquire();
+        }
     }
 
     @Override
@@ -106,6 +114,14 @@ public class MockLocationService extends Service {
         }
         
         return START_NOT_STICKY;
+    }
+
+    @Override
+    public void onDestroy() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+        super.onDestroy();
     }
 
     @Override

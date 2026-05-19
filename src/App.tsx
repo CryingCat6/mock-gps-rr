@@ -228,14 +228,12 @@ export default function App() {
     }
 
     const initializeAppLocation = async () => {
-      if ("geolocation" in navigator) {
-        navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: false, maximumAge: 60000 });
-      }
-
       if (isSystemBridgeActive) {
         try {
           await MockLocation.requestAppPermissions();
         } catch(e) {}
+      } else if ("geolocation" in navigator) {
+        navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: false, maximumAge: 60000 });
       }
 
       // Load Presets
@@ -1901,9 +1899,12 @@ export default function App() {
 
                     <div style={{ display: 'flex', gap: 12 }}>
                         <button 
-                            onClick={() => {
+                            onClick={async () => {
                                 if (!isRunning) {
                                   setPreMockRealLocation(realLocation);
+                                  if (isSystemBridgeActive) {
+                                      try { await MockLocation.requestAppPermissions(); } catch(e) {}
+                                  }
                                 }
                                 setIsRunning(!isRunning);
                                 setIsMockingStatic(true);
@@ -2012,8 +2013,11 @@ export default function App() {
 
                     <div style={{ display: 'flex', gap: 12, position: 'relative' }}>
                         <button 
-                            onClick={() => { 
+                            onClick={async () => { 
                               setPreMockRealLocation(realLocation);
+                              if (isSystemBridgeActive) {
+                                  try { await MockLocation.requestAppPermissions(); } catch(e) {}
+                              }
                               setMode('ACTIVE'); 
                               setIsRunning(true); 
                               setIsPaused(false);

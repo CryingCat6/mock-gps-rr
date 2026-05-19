@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver;
 import android.location.Location;
 import android.location.LocationManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -152,6 +153,11 @@ public class MockLocationPlugin extends Plugin {
                         mockLocation.setSpeedAccuracyMetersPerSecond(0.01f);
                     }
                     
+                    Bundle extras = new Bundle();
+                    extras.putInt("satellites", 12);
+                    mockLocation.setExtras(extras);
+                    mockLocation.makeComplete();
+
                     // Try to push it to the system
                     locationManager.setTestProviderLocation(providerName, mockLocation);
                 } catch (Exception e) {
@@ -183,6 +189,11 @@ public class MockLocationPlugin extends Plugin {
                                         mockLocation.setVerticalAccuracyMeters(0.1f);
                                         mockLocation.setSpeedAccuracyMetersPerSecond(0.01f);
                                     }
+                                    
+                                    Bundle extras = new Bundle();
+                                    extras.putInt("satellites", 12);
+                                    mockLocation.setExtras(extras);
+                                    mockLocation.makeComplete();
                                     
                                     // Try to push it to the system
                                     locationManager.setTestProviderLocation(providerName, mockLocation);
