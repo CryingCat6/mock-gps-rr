@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { 
   Search, MapPin, Navigation, 
   Layers, X, Activity, Target, ArrowLeft,
@@ -261,10 +261,10 @@ export default function App() {
   // SYSTEM BRIDGE DETECTION
   useEffect(() => {
     // Detect if we're in a native bridge that can handle system GPS mocking
-    const isMockBridge = (window as any).AndroidMockBridge || (window as any).Capacitor || (window as any).Cordova;
+    const isMockBridge = typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform();
     setIsSystemBridgeActive(!!isMockBridge);
     
-    if (isMockBridge && (window as any).Capacitor) {
+    if (isMockBridge) {
       const { MockLocation } = (window as any).Capacitor.Plugins;
       if (MockLocation?.addListener) {
         MockLocation.addListener('onMockStopped', () => {
@@ -470,13 +470,15 @@ export default function App() {
     if (!shouldMock) {
       MockLocation.stopMockLocation().then(() => {
         // When we stop mocking, try to refresh our real location from the system
-        if ("geolocation" in navigator) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => setRealLocation([pos.coords.latitude, pos.coords.longitude]),
-            null,
-            { enableHighAccuracy: true, timeout: 2000 }
-          );
-        }
+        setTimeout(() => {
+          if ("geolocation" in navigator) {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => setRealLocation([pos.coords.latitude, pos.coords.longitude]),
+              null,
+              { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+            );
+          }
+        }, 1500);
       }).catch((err: any) => console.warn(err));
       return;
     }
@@ -676,25 +678,25 @@ export default function App() {
     }
     
     // 6. Logik Apabila Butang PAUSE / PANGKAH (X) Ditekan
+    if (preMockRealLocation) {
+      setRealLocation(preMockRealLocation); // Instant snap back visually
+    }
+
     if (isSystemBridgeActive) {
-      if (preMockRealLocation) {
-        setRealLocation(preMockRealLocation); // Instant snap back visually
-      }
       MockLocation.stopMockLocation().then(() => {
-          if ("geolocation" in navigator) {
-            // Aggressive hardware request to clear stale cache
-            navigator.geolocation.getCurrentPosition(
-              (pos) => {
-                const latlng: [number, number] = [pos.coords.latitude, pos.coords.longitude];
-                setRealLocation(latlng);
-                // focusing map back to real location happens via isFollowingGPS
-              },
-              () => {
-                // If it fails, keep the fallback we just set
-              },
-              { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-            );
-          }
+          setTimeout(() => {
+            if ("geolocation" in navigator) {
+              // Aggressive hardware request to clear stale cache
+              navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                  const latlng: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+                  setRealLocation(latlng);
+                },
+                () => {},
+                { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+              );
+            }
+          }, 1500); // 1.5s delay to let native LocationManager clear its cache
       }).catch((err: any) => console.warn(err));
     }
     
@@ -896,7 +898,7 @@ export default function App() {
           // Feature 2: Arrival Logic
           setIsRunning(false);
           
-          if (isSystemBridgeActive && (window as any).Capacitor) {
+          if (isSystemBridgeActive) {
             const { MockLocation } = (window as any).Capacitor.Plugins;
             MockLocation.finishNotification({ title: 'Mock GPS rr', text: 'You have reached your destination. Now Mock your Location to destination.' }).catch(console.warn);
           } else {
@@ -930,7 +932,7 @@ export default function App() {
 
         // Send push notification every 5 seconds
         if (jitterTimerRef.current % 5 === 0) {
-          if (isSystemBridgeActive && (window as any).Capacitor) {
+          if (isSystemBridgeActive) {
              const remainingDist = Math.max(0, totalRouteDistance - nextD);
              const remainingSecs = Math.max(0, Math.round(remainingDist / (effectiveSpeed / 3.6)));
              const m = Math.floor(remainingSecs / 60);
@@ -1855,6 +1857,10 @@ export default function App() {
                             onClick={() => {
                                 if (!isRunning) {
                                   setPreMockRealLocation(realLocation);
+                                } else {
+                                  if (preMockRealLocation) {
+                                    setRealLocation(preMockRealLocation);
+                                  }
                                 }
                                 setIsRunning(!isRunning);
                                 setIsMockingStatic(true);
@@ -2192,7 +2198,7 @@ export default function App() {
                         <button 
                             onClick={async () => {
                                 setShowSetupGuide(false);
-                                if ((window as any).Capacitor) {
+                                if (isSystemBridgeActive) {
                                   try {
                                     const { MockLocation } = (window as any).Capacitor.Plugins;
                                     await MockLocation.openDeveloperOptions();
